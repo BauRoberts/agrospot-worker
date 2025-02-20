@@ -101,6 +101,33 @@ redisClient.on("connect", async () => {
     // Test Bull queue operations
     const testJob = await matchQueue.add("test-job", { test: true });
     logger.info("Added test job to queue:", { jobId: testJob.id });
+
+    // Force process the job immediately
+    logger.info("Attempting to force process the test job...");
+    setTimeout(async () => {
+      const job = await matchQueue.getJob(testJob.id);
+      if (job) {
+        logger.info("Found test job, attempting to process...", {
+          jobId: job.id,
+        });
+        try {
+          // Manually trigger processing for the test job
+          const processor = await matchQueue.getWorkers();
+          logger.info("Current workers:", { count: processor.length });
+
+          // Check queue status
+          const jobCounts = await matchQueue.getJobCounts();
+          logger.info("Current job counts:", jobCounts);
+        } catch (error) {
+          logger.error(
+            "Error force processing job:",
+            error instanceof Error ? error.message : "Unknown error"
+          );
+        }
+      } else {
+        logger.error("Could not find test job to force process");
+      }
+    }, 5000); // Wait 5 seconds before trying to force process
   } catch (error) {
     logger.error(
       "Redis test failed:",
@@ -334,6 +361,56 @@ app.get("/health", (req, res) => {
     uptime: process.uptime(),
     timestamp: Date.now(),
   });
+});
+
+app.get("/api/queue-status", async (req, res) => {
+  try {
+    // Get counts for different job statuses
+    const jobCounts = await matchQueue.getJobCounts();
+
+    // Get jobs by status
+    const waitingJobs = await matchQueue.getJobs(["waiting"]);
+    const activeJobs = await matchQueue.getJobs(["active"]);
+    const completedJobs = await matchQueue.getJobs(["completed"]);
+    const failedJobs = await matchQueue.getJobs(["failed"]);
+
+    // Get workers
+    const workers = await matchQueue.getWorkers();
+
+    return res.status(200).json({
+      counts: jobCounts,
+      workers: workers.length,
+      jobs: {
+        waiting: waitingJobs.map((job) => ({
+          id: job.id,
+          data: job.data,
+          timestamp: job.timestamp,
+        })),
+        active: activeJobs.map((job) => ({
+          id: job.id,
+          data: job.data,
+          timestamp: job.timestamp,
+        })),
+        completed: completedJobs.slice(0, 5).map((job) => ({
+          id: job.id,
+          data: job.data,
+          timestamp: job.timestamp,
+        })),
+        failed: failedJobs.slice(0, 5).map((job) => ({
+          id: job.id,
+          data: job.data,
+          timestamp: job.timestamp,
+          failedReason: job.failedReason,
+        })),
+      },
+    });
+  } catch (error) {
+    logger.error("Error getting queue status:", error);
+    return res.status(500).json({
+      error: "Failed to get queue status",
+      details: error instanceof Error ? error.message : "Unknown error",
+    });
+  }
 });
 
 // Start server
