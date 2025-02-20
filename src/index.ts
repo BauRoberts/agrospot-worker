@@ -146,7 +146,15 @@ app.post("/api/process", authenticate, async (req, res) => {
   try {
     const { quotationId } = req.body;
 
+    logger.info("Received process request:", {
+      quotationId,
+      headers: req.headers,
+      url: req.url,
+      method: req.method,
+    });
+
     if (!quotationId || typeof quotationId !== "number") {
+      logger.error("Invalid quotationId received:", quotationId);
       return res.status(400).json({ error: "Invalid quotationId" });
     }
 
@@ -156,6 +164,7 @@ app.post("/api/process", authenticate, async (req, res) => {
     });
 
     if (!quotation) {
+      logger.error("Quotation not found:", quotationId);
       return res.status(404).json({ error: "Quotation not found" });
     }
 
@@ -173,7 +182,10 @@ app.post("/api/process", authenticate, async (req, res) => {
       quotationId,
     });
   } catch (error) {
-    logger.error("Error adding job to queue:", error);
+    logger.error("Error processing request:", {
+      error: error instanceof Error ? error.message : "Unknown error",
+      stack: error instanceof Error ? error.stack : undefined,
+    });
     return res.status(500).json({
       error: "Failed to process request",
       details: error instanceof Error ? error.message : "Unknown error",
