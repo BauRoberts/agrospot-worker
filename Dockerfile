@@ -2,14 +2,14 @@ FROM node:18-alpine
 
 WORKDIR /app
 
-# Install dependencies first (for better caching)
+# Add package files first for better caching
 COPY package.json package-lock.json* ./
-RUN npm ci
 
-# Copy prisma schema
+# Fix npm installation issues by clearing cache and using clean install
+RUN npm cache clean --force && npm ci --omit=dev
+
+# Copy prisma schema and generate client
 COPY prisma ./prisma/
-
-# Generate Prisma client
 RUN npx prisma generate
 
 # Copy the rest of the application
