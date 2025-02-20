@@ -39,18 +39,50 @@ prisma.$on("error", (e) => {
 
 // Configure Redis connection
 const redisUrl = process.env.REDIS_URL || "redis://localhost:6379";
+logger.info(`Connecting to Redis at ${redisUrl.split("@")[1] || "localhost"}`); // Log without password
 
-// Create match processing queue
+// Redis connection options
+const redisOptions = {
+  maxRetriesPerRequest: 50,
+  retryStrategy: (times: number) => {
+    const delay = Math.min(times * 100, 3000);
+    logger.info(`Redis retry attempt ${times} with delay ${delay}ms`);
+    return delay; // Maximum 3 seconds
+  },
+  enableReadyCheck: false, // Helps with some connection issues
+  maxReconnectAttempts: 20,
+  reconnectOnError: (err: Error) => {
+    logger.error("Redis connection error:", err);
+    return true; // Always try to reconnect
+  },
+};
+
+// Create match processing queue with enhanced options
 const matchQueue = new Bull("match-processing", redisUrl, {
+  redis: redisOptions,
   defaultJobOptions: {
     attempts: 3,
     backoff: {
       type: "exponential",
       delay: 5000,
     },
-    removeOnComplete: 100, // Keep last 100 completed jobs
-    removeOnFail: 200, // Keep last 200 failed jobs
+    removeOnComplete: 100,
+    removeOnFail: 200,
   },
+});
+
+// Add Redis connection event handlers
+const redisClient = matchQueue.client;
+redisClient.on("connect", () => {
+  logger.info("Redis client connected");
+});
+
+redisClient.on("error", (err) => {
+  logger.error("Redis client error:", err);
+});
+
+redisClient.on("reconnecting", () => {
+  logger.info("Redis client reconnecting...");
 });
 
 // Process match jobs using our processor
@@ -71,7 +103,6 @@ matchQueue.process(async (job) => {
 // Global error handlers
 matchQueue.on("failed", (job, err) => {
   logger.error(`Job ${job.id} failed with error:`, err);
-  // No need to update status here as the processor already does it
 });
 
 matchQueue.on("completed", (job) => {
@@ -164,7 +195,6 @@ app.get("/api/status/:quotationId", authenticate, async (req, res) => {
       select: {
         id: true,
         status: true,
-        // @ts-ignore - Field exists in DB but not in TypeScript types
         processingStatus: true,
         createdAt: true,
         updatedAt: true,
@@ -230,7 +260,6 @@ app.listen(port, () => {
   try {
     const stuckQuotations = await prisma.quotation.findMany({
       where: {
-        // @ts-ignore - Field exists in DB but not in TypeScript types
         processingStatus: "processing",
       },
     });
