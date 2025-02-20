@@ -86,18 +86,60 @@ redisClient.on("reconnecting", () => {
 });
 
 // Process match jobs using our processor
+// Process match jobs using our processor
 matchQueue.process(async (job) => {
-  logger.info(`Processing job ${job.id} for quotation ${job.data.quotationId}`);
+  logger.info(`Starting to process job ${job.id}`, {
+    jobId: job.id,
+    quotationId: job.data.quotationId,
+    timestamp: new Date().toISOString(),
+  });
+
   try {
     // Import dynamically to ensure proper initialization
     const { processMatches } = await import("./processors/match-processor");
+
+    logger.info(`Processing matches for quotation ${job.data.quotationId}`, {
+      jobId: job.id,
+      processorLoaded: true,
+    });
+
     await processMatches(job.data.quotationId, prisma, logger);
-    logger.info(`Successfully completed job ${job.id}`);
+
+    logger.info(`Successfully completed processing for job ${job.id}`, {
+      quotationId: job.data.quotationId,
+      completed: true,
+    });
+
     return { success: true };
   } catch (error) {
-    logger.error(`Error processing job ${job.id}:`, error);
-    throw error; // Rethrow to let Bull handle retry logic
+    logger.error(`Error processing job ${job.id}:`, {
+      error: error instanceof Error ? error.message : "Unknown error",
+      stack: error instanceof Error ? error.stack : undefined,
+      quotationId: job.data.quotationId,
+    });
+    throw error;
   }
+});
+
+// Also add queue event listeners
+matchQueue.on("completed", (job) => {
+  logger.info(`Queue job ${job.id} completed successfully`, {
+    quotationId: job.data.quotationId,
+  });
+});
+
+matchQueue.on("failed", (job, err) => {
+  logger.error(`Queue job ${job.id} failed`, {
+    quotationId: job.data?.quotationId,
+    error: err.message,
+    stack: err.stack,
+  });
+});
+
+matchQueue.on("active", (job) => {
+  logger.info(`Queue job ${job.id} started processing`, {
+    quotationId: job.data.quotationId,
+  });
 });
 
 // Global error handlers
