@@ -1,0 +1,259 @@
+generator client {
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "rhel-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Product {
+  id             Int              @id @default(autoincrement())
+  name           String
+  createdAt      DateTime         @default(now()) @map("created_at")
+  updatedAt      DateTime         @updatedAt
+  category       String           @default("Granos")
+  opportunities  Opportunity[]
+  quotations     Quotation[]
+  referencePrice ReferencePrice[]
+
+  @@map("products")
+}
+
+model PaymentOption {
+  id               Int      @id @default(autoincrement())
+  opportunityId    Int      @map("opportunity_id")
+  pricePerTon      Decimal? @map("price_per_ton") @db.Decimal(10, 2)
+  paymentTermDays  Int      @map("payment_term_days")
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @updatedAt @map("updated_at")
+  isReferenceBased Boolean  @default(false) @map("is_reference_based")
+  referenceDiff    Decimal? @map("reference_diff") @db.Decimal(10, 4)
+  referenceDiffType String  @default("percentage") @map("reference_diff_type") // New field
+  matches          Match[]
+  opportunity      Opportunity @relation(fields: [opportunityId], references: [id], onDelete: Cascade)
+    referenceDiffCurrency String  @default("ARS") @map("reference_diff_currency") // New field
+
+
+  @@map("payment_options")
+}
+
+model Opportunity {
+  id                      Int             @id @default(autoincrement())
+  productId               Int             @map("product_id")
+  quantityTons            Decimal?        @map("quantity_tons") @db.Decimal(10, 2)
+  status                  String          @default("active")
+  locationId              Int             @map("location_id")
+  name                    String          @map("name")
+  cellphone               String          @map("cellphone")
+  email                   String          @map("email")
+  quality                 String?         @map("quality")
+  transportationCostPerKm Decimal         @default(0) @map("transportation_cost_per_km") @db.Decimal(10, 2)
+  marketType              String          @default("Disponible") @map("market_type")
+  expirationDate          DateTime?       @map("expiration_date")
+  currency                String          @default("ARS") @map("currency")
+  createdAt               DateTime        @default(now()) @map("created_at")
+  updatedAt               DateTime        @updatedAt @map("updated_at")
+  matches                 Match[]
+  location                Location        @relation(fields: [locationId], references: [id])
+  product                 Product         @relation(fields: [productId], references: [id])
+  paymentOptions          PaymentOption[]
+  userId    String?
+  user      User?    @relation(fields: [userId], references: [id])
+
+  @@map("opportunities")
+}
+
+model Quotation {
+  id            Int        @id @default(autoincrement())
+  productId     Int        @map("product_id")
+  quantityTons  Decimal    @map("quantity_tons") @db.Decimal(10, 2)
+  status        String     @default("pending")
+  processingStatus String  @default("not_started") @map("processing_status")
+  createdAt     DateTime   @default(now()) @map("created_at")
+  updatedAt     DateTime   @updatedAt @map("updated_at")
+  locationId    Int        @map("location_id")
+  name          String     @map("name")
+  cellphone     String     @map("cellphone")
+  email         String     @map("email")
+  matches       Match[]
+  location      Location   @relation(fields: [locationId], references: [id])
+  product       Product    @relation(fields: [productId], references: [id])
+  userId        String?
+  user          User?      @relation(fields: [userId], references: [id])
+
+  @@map("quotations")
+}
+
+model Match {
+  id                       Int           @id @default(autoincrement())
+  quotationId              Int           @map("quotation_id")
+  opportunityId            Int           @map("opportunity_id")
+  matchScore               Decimal       @map("match_score") @db.Decimal(10, 2)
+  createdAt                DateTime      @default(now()) @map("created_at")
+  paymentOptionId          Int           @map("payment_option_id")
+  commission               Decimal       @default(0) @map("commission") @db.Decimal(10, 2)
+  profitability            Decimal       @default(0) @map("profitability") @db.Decimal(10, 2)
+  transportationCost       Decimal       @default(0) @map("transportation_cost") @db.Decimal(10, 2)
+  profitabilityVsReference Decimal       @default(0) @map("profitability_vs_reference") @db.Decimal(10, 2)
+  pricePerTon              Decimal       @map("price_per_ton") @db.Decimal(15, 2)  // Increase precision
+  transportCost            Decimal       @map("transport_cost") @db.Decimal(15, 2)  // Increase precision
+  totalAmount              Decimal       @map("total_amount") @db.Decimal(15, 2)    // Increase precision
+  opportunity              Opportunity   @relation(fields: [opportunityId], references: [id], onDelete: Cascade)
+  paymentOption            PaymentOption @relation(fields: [paymentOptionId], references: [id], onDelete: Cascade)
+  quotation                Quotation     @relation(fields: [quotationId], references: [id])
+  routeId         Int?      @map("route_id")
+  route           Route?    @relation(fields: [routeId], references: [id])
+
+  @@map("matches")
+}
+
+model Location {
+  id            Int           @id @default(autoincrement())
+  city          String
+  state         String?
+  country       String
+  latitude      Float
+  longitude     Float
+  createdAt     DateTime      @default(now()) @map("created_at")
+  updatedAt     DateTime      @updatedAt @map("updated_at")
+  placeId       String        @unique @map("place_id")
+  opportunities Opportunity[]
+  quotations    Quotation[]
+  originRoutes      Route[] @relation("originRoutes")
+  destinationRoutes Route[] @relation("destinationRoutes")
+
+  @@map("locations")
+}
+
+model ReferencePrice {
+  id          Int      @id @default(autoincrement())
+  productId   Int      @map("product_id")
+  pricePerTon Decimal  @map("price_per_ton") @db.Decimal(10, 2)
+  currency    String   @default("USD")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+  createdAt   DateTime @default(now()) @map("created_at")
+  product     Product  @relation(fields: [productId], references: [id])
+
+  @@index([productId])
+  @@map("reference_prices")
+}
+
+model SystemConfig {
+  id                 Int      @id @default(1)
+  usdToArsRate       Decimal  @map("usd_to_ars_rate") @db.Decimal(10, 2)
+  transportCostPerKm Decimal  @map("transport_cost_per_km") @db.Decimal(10, 2)
+  updatedAt          DateTime @updatedAt @map("updated_at")
+
+  @@map("systemconfig")
+}
+
+model TransportRate {
+  id            Int      @id @default(autoincrement())
+  kilometers    Int      @unique  // The distance in km
+  ratePerTon    Decimal  @map("rate_per_ton") @db.Decimal(10,2)  // The rate from CATAC table in pesos
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  @@map("transport_rates")
+}
+
+model Route {
+  id              Int       @id @default(autoincrement())
+  originId        Int       @map("origin_id")
+  destinationId   Int       @map("destination_id")
+  distanceMeters  Int       @map("distance_meters")
+  durationSeconds Int       @map("duration_seconds")
+  routeGeometry   String?   @map("route_geometry")
+  origin          Location  @relation("originRoutes", fields: [originId], references: [id])
+  destination     Location  @relation("destinationRoutes", fields: [destinationId], references: [id])
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+  isValid         Boolean   @default(true)
+  matches         Match[]
+
+  @@unique([originId, destinationId])
+  @@map("routes")
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@map("accounts")
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("sessions")
+}
+
+model User {
+  id            String    @id @default(cuid())
+  name          String?
+  email         String?   @unique
+  emailVerified DateTime?
+  image         String?
+  password      String?
+  role          String    @default("user")
+  inviteCode    String?   // Add this field
+  accounts      Account[]
+  sessions      Session[]
+  opportunities Opportunity[]
+  quotations    Quotation[]
+
+  @@map("users")
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+  @@map("verification_tokens")
+}
+
+model InviteCode {
+  id        String   @id @default(cuid())
+  code      String   @unique
+  email     String?  
+  used      Boolean  @default(false)
+  usedBy    String?
+  expiresAt DateTime
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("invite_codes")
+}
+
+model TempGoogleUser {
+  id            String   @id @default(cuid())
+  email         String
+  name          String
+  providerAccountId String  // Changed from 'sub' to 'providerAccountId'
+  access_token  String?
+  expires       DateTime
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  @@map("temp_google_users")
+}
