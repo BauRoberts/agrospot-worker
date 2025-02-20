@@ -37,21 +37,6 @@ prisma.$on("error", (e) => {
   logger.error("Database error", e);
 });
 
-// Test database connection
-const testDatabase = async () => {
-  try {
-    const count = await prisma.quotation.count();
-    logger.info("Database connection test successful", {
-      quotationCount: count,
-    });
-  } catch (error) {
-    logger.error(
-      "Database connection test failed:",
-      error instanceof Error ? error.message : "Unknown error"
-    );
-  }
-};
-
 // Configure Redis connection
 const redisUrl = process.env.REDIS_URL || "redis://localhost:6379";
 logger.info(`Connecting to Redis at ${redisUrl.split("@")[1] || "localhost"}`); // Log without password
@@ -88,52 +73,8 @@ const matchQueue = new Bull("match-processing", redisUrl, {
 
 // Add Redis connection event handlers
 const redisClient = matchQueue.client;
-
-redisClient.on("connect", async () => {
+redisClient.on("connect", () => {
   logger.info("Redis client connected");
-
-  try {
-    // Test basic Redis operations
-    await redisClient.set("test-key", "test-value");
-    const value = await redisClient.get("test-key");
-    logger.info("Redis test successful:", { value });
-
-    // Test Bull queue operations
-    const testJob = await matchQueue.add("test-job", { test: true });
-    logger.info("Added test job to queue:", { jobId: testJob.id });
-
-    // Force process the job immediately
-    logger.info("Attempting to force process the test job...");
-    setTimeout(async () => {
-      const job = await matchQueue.getJob(testJob.id);
-      if (job) {
-        logger.info("Found test job, attempting to process...", {
-          jobId: job.id,
-        });
-        try {
-          // Manually trigger processing for the test job
-          const processor = await matchQueue.getWorkers();
-          logger.info("Current workers:", { count: processor.length });
-
-          // Check queue status
-          const jobCounts = await matchQueue.getJobCounts();
-          logger.info("Current job counts:", jobCounts);
-        } catch (error) {
-          logger.error(
-            "Error force processing job:",
-            error instanceof Error ? error.message : "Unknown error"
-          );
-        }
-      } else {
-        logger.error("Could not find test job to force process");
-      }
-    }, 5000); // Wait 5 seconds before trying to force process
-  } catch (error) {
-    logger.error(
-      "Redis test failed:",
-      error instanceof Error ? error.message : "Unknown error"
-    );
-  }
 });
 
 redisClient.on("error", (err) => {
@@ -144,7 +85,8 @@ redisClient.on("reconnecting", () => {
   logger.info("Redis client reconnecting...");
 });
 
-// Process match jobs with enhanced logging
+// Process match jobs using our processor
+// Process match jobs using our processor
 matchQueue.process(async (job) => {
   logger.info(`Starting to process job ${job.id}`, {
     jobId: job.id,
@@ -160,12 +102,6 @@ matchQueue.process(async (job) => {
       jobId: job.id,
       processorLoaded: true,
     });
-
-    // Check if this is a test job
-    if (job.data.test === true) {
-      logger.info("Processing test job - skipping match processor");
-      return { success: true, test: true };
-    }
 
     await processMatches(job.data.quotationId, prisma, logger);
 
@@ -185,11 +121,10 @@ matchQueue.process(async (job) => {
   }
 });
 
-// Queue event listeners
+// Also add queue event listeners
 matchQueue.on("completed", (job) => {
   logger.info(`Queue job ${job.id} completed successfully`, {
     quotationId: job.data.quotationId,
-    isTest: job.data.test === true,
   });
 });
 
@@ -204,8 +139,16 @@ matchQueue.on("failed", (job, err) => {
 matchQueue.on("active", (job) => {
   logger.info(`Queue job ${job.id} started processing`, {
     quotationId: job.data.quotationId,
-    isTest: job.data.test === true,
   });
+});
+
+// Global error handlers
+matchQueue.on("failed", (job, err) => {
+  logger.error(`Job ${job.id} failed with error:`, err);
+});
+
+matchQueue.on("completed", (job) => {
+  logger.info(`Job ${job.id} completed successfully`);
 });
 
 // Set up API server
@@ -221,33 +164,22 @@ if (!apiKey) {
 // Parse JSON bodies
 app.use(express.json());
 
-// Simple authentication middleware with enhanced logging
+// Simple authentication middleware
 const authenticate = (
   req: express.Request,
   res: express.Response,
   next: express.NextFunction
 ) => {
   const authHeader = req.headers.authorization;
-  logger.info("Auth check:", {
-    hasAuthHeader: !!authHeader,
-    authHeaderStart: authHeader ? authHeader.substring(0, 20) + "..." : null,
-  });
 
   if (
     !authHeader ||
     !authHeader.startsWith("Bearer ") ||
     authHeader.replace("Bearer ", "") !== apiKey
   ) {
-    logger.error("Authentication failed", {
-      provided: authHeader
-        ? authHeader.replace("Bearer ", "").substring(0, 5) + "..."
-        : "none",
-      expected: apiKey.substring(0, 5) + "...",
-    });
     return res.status(401).json({ error: "Unauthorized" });
   }
 
-  logger.info("Authentication successful");
   next();
 };
 
@@ -363,56 +295,6 @@ app.get("/health", (req, res) => {
   });
 });
 
-app.get("/api/queue-status", async (req, res) => {
-  try {
-    // Get counts for different job statuses
-    const jobCounts = await matchQueue.getJobCounts();
-
-    // Get jobs by status
-    const waitingJobs = await matchQueue.getJobs(["waiting"]);
-    const activeJobs = await matchQueue.getJobs(["active"]);
-    const completedJobs = await matchQueue.getJobs(["completed"]);
-    const failedJobs = await matchQueue.getJobs(["failed"]);
-
-    // Get workers
-    const workers = await matchQueue.getWorkers();
-
-    return res.status(200).json({
-      counts: jobCounts,
-      workers: workers.length,
-      jobs: {
-        waiting: waitingJobs.map((job) => ({
-          id: job.id,
-          data: job.data,
-          timestamp: job.timestamp,
-        })),
-        active: activeJobs.map((job) => ({
-          id: job.id,
-          data: job.data,
-          timestamp: job.timestamp,
-        })),
-        completed: completedJobs.slice(0, 5).map((job) => ({
-          id: job.id,
-          data: job.data,
-          timestamp: job.timestamp,
-        })),
-        failed: failedJobs.slice(0, 5).map((job) => ({
-          id: job.id,
-          data: job.data,
-          timestamp: job.timestamp,
-          failedReason: job.failedReason,
-        })),
-      },
-    });
-  } catch (error) {
-    logger.error("Error getting queue status:", error);
-    return res.status(500).json({
-      error: "Failed to get queue status",
-      details: error instanceof Error ? error.message : "Unknown error",
-    });
-  }
-});
-
 // Start server
 app.listen(port, () => {
   logger.info(`Worker API running on port ${port}`);
@@ -422,9 +304,6 @@ app.listen(port, () => {
 // Startup routine
 (async () => {
   logger.info("Starting Agrospot worker...");
-
-  // Test database connection
-  await testDatabase();
 
   // Clean any stalled jobs
   await matchQueue.clean(0, "delayed");
