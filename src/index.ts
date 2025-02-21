@@ -716,6 +716,89 @@ app.get("/api/cron/process-pending-quotations", async (req, res) => {
     });
   }
 });
+// Public endpoint to manually process a quotation (for testing)
+app.get("/api/manual-process/:quotationId", async (req, res) => {
+  try {
+    const quotationId = parseInt(req.params.quotationId);
+
+    if (isNaN(quotationId)) {
+      return res.status(400).json({ error: "Invalid quotation ID" });
+    }
+
+    logger.info(`Manual processing request for quotation ${quotationId}`);
+
+    // Check if quotation exists
+    const quotation = await prisma.quotation.findUnique({
+      where: { id: quotationId },
+    });
+
+    if (!quotation) {
+      return res.status(404).json({ error: "Quotation not found" });
+    }
+
+    // Add job to queue
+    const job = await matchQueue.add({
+      quotationId,
+      timestamp: new Date().toISOString(),
+      isManual: true,
+    });
+
+    logger.info(`Manually added job for quotation ${quotationId}`);
+
+    return res.status(200).json({
+      message: "Processing started",
+      jobId: job.id,
+      quotationId,
+    });
+  } catch (error) {
+    logger.error(`Error in manual process:`, error);
+    return res.status(500).json({
+      error: "Failed to process",
+      details: error instanceof Error ? error.message : "Unknown error",
+    });
+  }
+});
+// Serve a simple HTML page for testing
+app.get("/manual", (req, res) => {
+  res.send(`
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <title>Manual Processing</title>
+      <style>
+        body { font-family: Arial, sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; }
+        button { padding: 10px; margin: 5px; }
+        input { padding: 10px; width: 100px; }
+      </style>
+    </head>
+    <body>
+      <h1>Manual Quotation Processing</h1>
+      <div>
+        <label>Quotation ID: <input type="number" id="quotationId" value="65"></label>
+        <button onclick="processQuotation()">Process</button>
+      </div>
+      <div id="result" style="margin-top: 20px; padding: 10px; border: 1px solid #ccc;"></div>
+      
+      <script>
+        async function processQuotation() {
+          const id = document.getElementById('quotationId').value;
+          const resultDiv = document.getElementById('result');
+          
+          resultDiv.innerHTML = 'Processing...';
+          
+          try {
+            const response = await fetch(\`/api/manual-process/\${id}\`);
+            const data = await response.json();
+            resultDiv.innerHTML = \`<pre>\${JSON.stringify(data, null, 2)}</pre>\`;
+          } catch (error) {
+            resultDiv.innerHTML = \`Error: \${error.message}\`;
+          }
+        }
+      </script>
+    </body>
+    </html>
+  `);
+});
 
 // Export for testing
 export { matchQueue, prisma, logger };
