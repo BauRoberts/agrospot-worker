@@ -674,5 +674,48 @@ app.post("/api/force-process/:quotationId", async (req, res) => {
   }
 });
 
+// In your Railway worker, add a new endpoint:
+app.get("/api/cron/process-pending-quotations", async (req, res) => {
+  try {
+    // Find quotations with 'pending' processing status
+    const pendingQuotations = await prisma.quotation.findMany({
+      where: {
+        processingStatus: "pending",
+        createdAt: {
+          // Only process quotations from last 24 hours
+          gte: new Date(Date.now() - 24 * 60 * 60 * 1000),
+        },
+      },
+      take: 10, // Process in batches
+    });
+
+    logger.info(
+      `Found ${pendingQuotations.length} pending quotations to process`
+    );
+
+    for (const quotation of pendingQuotations) {
+      // Add to queue for processing
+      const job = await matchQueue.add({
+        quotationId: quotation.id,
+        timestamp: new Date().toISOString(),
+        isCronJob: true,
+      });
+
+      logger.info(`Added job ${job.id} for pending quotation ${quotation.id}`);
+    }
+
+    return res.status(200).json({
+      message: `Scheduled ${pendingQuotations.length} quotations for processing`,
+      quotations: pendingQuotations.map((q) => q.id),
+    });
+  } catch (error) {
+    logger.error("Error in cron job:", error);
+    return res.status(500).json({
+      error: "Failed to process pending quotations",
+      details: error instanceof Error ? error.message : "Unknown error",
+    });
+  }
+});
+
 // Export for testing
 export { matchQueue, prisma, logger };
