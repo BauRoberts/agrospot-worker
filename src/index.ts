@@ -259,15 +259,52 @@ const authenticate = (
 };
 
 // API route to add job to queue
-app.post("/api/process", authenticate, async (req, res) => {
+app.post("/api/process", async (req, res) => {
+  // Log raw request details before authentication
+  logger.info("Received raw API request:", {
+    url: req.url,
+    method: req.method,
+    hasAuthHeader: !!req.headers.authorization,
+    bodyKeys: Object.keys(req.body),
+    bodyValues: req.body,
+  });
+
+  // Check authentication manually without using middleware
+  const authHeader = req.headers.authorization;
+  const expectedKey = process.env.BACKGROUND_PROCESSING_KEY;
+
+  logger.info("Auth check details:", {
+    hasAuthHeader: !!authHeader,
+    expectedKeyPrefix: expectedKey
+      ? expectedKey.substring(0, 5) + "..."
+      : "not set",
+    providedKeyPrefix: authHeader
+      ? authHeader.replace("Bearer ", "").substring(0, 5) + "..."
+      : "none",
+    authMatch: authHeader && authHeader.replace("Bearer ", "") === expectedKey,
+  });
+
+  if (
+    !authHeader ||
+    !authHeader.startsWith("Bearer ") ||
+    authHeader.replace("Bearer ", "") !== expectedKey
+  ) {
+    logger.error("Authentication failed", {
+      hasAuth: !!authHeader,
+      startsWithBearer: authHeader ? authHeader.startsWith("Bearer ") : false,
+      keyMatch: authHeader
+        ? authHeader.replace("Bearer ", "") === expectedKey
+        : false,
+    });
+    return res.status(401).json({ error: "Unauthorized" });
+  }
+
   try {
     const { quotationId } = req.body;
 
-    logger.info("Received process request:", {
+    logger.info("Processing authenticated request:", {
       quotationId,
-      headers: req.headers,
-      url: req.url,
-      method: req.method,
+      timestamp: new Date().toISOString(),
     });
 
     if (!quotationId || typeof quotationId !== "number") {
@@ -276,30 +313,60 @@ app.post("/api/process", authenticate, async (req, res) => {
     }
 
     // Check if quotation exists
-    const quotation = await prisma.quotation.findUnique({
-      where: { id: quotationId },
-    });
+    try {
+      const quotation = await prisma.quotation.findUnique({
+        where: { id: quotationId },
+      });
 
-    if (!quotation) {
-      logger.error("Quotation not found:", quotationId);
-      return res.status(404).json({ error: "Quotation not found" });
+      if (!quotation) {
+        logger.error("Quotation not found:", quotationId);
+        return res.status(404).json({ error: "Quotation not found" });
+      }
+
+      logger.info("Found quotation in database:", {
+        id: quotation.id,
+        status: quotation.status,
+      });
+    } catch (dbError) {
+      logger.error("Database error when finding quotation:", {
+        error: dbError instanceof Error ? dbError.message : "Unknown error",
+        quotationId,
+      });
+      throw dbError;
     }
 
-    // Add job to queue - no job type specified means it uses the default processor
-    const job = await matchQueue.add({
-      quotationId,
-      timestamp: new Date().toISOString(),
-    });
+    // Add job to queue
+    try {
+      const job = await matchQueue.add({
+        quotationId,
+        timestamp: new Date().toISOString(),
+      });
 
-    logger.info(`Added job ${job.id} to process quotation ${quotationId}`);
+      logger.info(`Successfully added job to queue:`, {
+        jobId: job.id,
+        quotationId,
+      });
 
-    return res.status(202).json({
-      message: "Processing started",
-      jobId: job.id,
-      quotationId,
-    });
+      // Get current queue status
+      const jobCounts = await matchQueue.getJobCounts();
+      logger.info("Current queue status after adding job:", jobCounts);
+
+      return res.status(202).json({
+        message: "Processing started",
+        jobId: job.id,
+        quotationId,
+      });
+    } catch (queueError) {
+      logger.error("Error adding job to queue:", {
+        error:
+          queueError instanceof Error ? queueError.message : "Unknown error",
+        stack: queueError instanceof Error ? queueError.stack : undefined,
+        quotationId,
+      });
+      throw queueError;
+    }
   } catch (error) {
-    logger.error("Error processing request:", {
+    logger.error("Error in process API handler:", {
       error: error instanceof Error ? error.message : "Unknown error",
       stack: error instanceof Error ? error.stack : undefined,
     });
@@ -465,6 +532,147 @@ app.listen(port, () => {
     logger.error("Failed to recover stuck quotations:", error);
   }
 })();
+
+// Add this detailed debug endpoint
+// Simplified debug endpoint
+app.get("/api/debug", async (req, res) => {
+  try {
+    // Get current environment info
+    const envInfo = {
+      nodeEnv: process.env.NODE_ENV,
+      hasRedisUrl: !!process.env.REDIS_URL,
+      hasBgProcessingKey: !!process.env.BACKGROUND_PROCESSING_KEY,
+      port: process.env.PORT || 8080,
+      uptime: process.uptime(),
+    };
+
+    // Get Redis client status
+    const redisStatus: any = {
+      connected: redisClient.status === "ready",
+      status: redisClient.status,
+    };
+
+    try {
+      // Test Redis connection
+      const pingResult = await redisClient.ping();
+      redisStatus.pingResult = pingResult;
+    } catch (redisError) {
+      redisStatus.error =
+        redisError instanceof Error ? redisError.message : "Unknown error";
+    }
+
+    // Get Bull queue status
+    const queueInfo = {
+      name: matchQueue.name,
+      isReady: matchQueue.isReady(),
+      jobCounts: await matchQueue.getJobCounts(),
+    };
+
+    // Get worker info
+    const workers = await matchQueue.getWorkers();
+    const workerInfo = {
+      count: workers.length,
+      workers: workers.map((w) => ({ id: w.id })),
+    };
+
+    // Get jobs by status
+    const waiting = await matchQueue.getJobs(["waiting"]);
+    const active = await matchQueue.getJobs(["active"]);
+    const completed = await matchQueue.getJobs(["completed"]);
+    const failed = await matchQueue.getJobs(["failed"]);
+
+    return res.status(200).json({
+      environment: envInfo,
+      redis: redisStatus,
+      queue: queueInfo,
+      workers: workerInfo,
+      jobs: {
+        waiting: waiting.slice(0, 5).map((job) => ({
+          id: job.id,
+          data: job.data,
+          timestamp: job.timestamp,
+        })),
+        active: active.slice(0, 5).map((job) => ({
+          id: job.id,
+          data: job.data,
+          timestamp: job.timestamp,
+        })),
+        completed: completed.slice(0, 5).map((job) => ({
+          id: job.id,
+          data: job.data,
+          timestamp: job.timestamp,
+          processedOn: job.processedOn,
+          finishedOn: job.finishedOn,
+        })),
+        failed: failed.slice(0, 5).map((job) => ({
+          id: job.id,
+          data: job.data,
+          timestamp: job.timestamp,
+          failedReason: job.failedReason,
+        })),
+      },
+    });
+  } catch (error) {
+    logger.error("Error in debug endpoint:", error);
+    return res.status(500).json({
+      error: "Failed to get debug info",
+      details: error instanceof Error ? error.message : "Unknown error",
+    });
+  }
+});
+
+// Add a manual trigger endpoint for testing
+app.post("/api/force-process/:quotationId", async (req, res) => {
+  try {
+    const quotationId = parseInt(req.params.quotationId);
+
+    if (isNaN(quotationId)) {
+      return res.status(400).json({ error: "Invalid quotation ID" });
+    }
+
+    logger.info(`Manually forcing processing for quotation ${quotationId}`);
+
+    // Check if quotation exists
+    const quotation = await prisma.quotation.findUnique({
+      where: { id: quotationId },
+    });
+
+    if (!quotation) {
+      return res.status(404).json({ error: "Quotation not found" });
+    }
+
+    // Add job to queue with priority
+    const job = await matchQueue.add(
+      {
+        quotationId,
+        timestamp: new Date().toISOString(),
+        isManual: true,
+      },
+      {
+        priority: 1, // High priority
+        attempts: 3,
+        backoff: {
+          type: "exponential",
+          delay: 1000,
+        },
+      }
+    );
+
+    logger.info(`Manually added job ${job.id} for quotation ${quotationId}`);
+
+    return res.status(202).json({
+      message: "Manual processing started",
+      jobId: job.id,
+      quotationId,
+    });
+  } catch (error) {
+    logger.error(`Error in manual process:`, error);
+    return res.status(500).json({
+      error: "Failed to process manually",
+      details: error instanceof Error ? error.message : "Unknown error",
+    });
+  }
+});
 
 // Export for testing
 export { matchQueue, prisma, logger };
