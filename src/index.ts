@@ -770,6 +770,18 @@ app.get("/api/manual-process/:quotationId", async (req, res) => {
 });
 
 // Serve a simple HTML page for testing
+// Add this simple endpoint that's ultra-lightweight
+app.post("/api/simple-process", (req, res) => {
+  logger.info("Received simple process request:", {
+    headers: req.headers,
+    body: req.body,
+    ip: req.ip,
+  });
+
+  res.status(200).send("OK");
+});
+
+// And update the manual page to add a test for this endpoint
 app.get("/manual", (req, res) => {
   res.send(`
     <!DOCTYPE html>
@@ -788,6 +800,9 @@ app.get("/manual", (req, res) => {
         <label>Quotation ID: <input type="number" id="quotationId" value="65"></label>
         <button onclick="processQuotation()">Process</button>
       </div>
+      <div>
+        <button onclick="testSimpleEndpoint()">Test Simple Endpoint</button>
+      </div>
       <div id="result" style="margin-top: 20px; padding: 10px; border: 1px solid #ccc;"></div>
       
       <script>
@@ -801,6 +816,23 @@ app.get("/manual", (req, res) => {
             const response = await fetch(\`/api/manual-process/\${id}\`);
             const data = await response.json();
             resultDiv.innerHTML = \`<pre>\${JSON.stringify(data, null, 2)}</pre>\`;
+          } catch (error) {
+            resultDiv.innerHTML = \`Error: \${error.message}\`;
+          }
+        }
+        
+        async function testSimpleEndpoint() {
+          const resultDiv = document.getElementById('result');
+          resultDiv.innerHTML = 'Testing simple endpoint...';
+          
+          try {
+            const response = await fetch('/api/simple-process', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ test: true })
+            });
+            const text = await response.text();
+            resultDiv.innerHTML = \`Response: \${text}\`;
           } catch (error) {
             resultDiv.innerHTML = \`Error: \${error.message}\`;
           }
