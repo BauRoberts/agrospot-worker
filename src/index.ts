@@ -145,8 +145,6 @@ redisClient.on("reconnecting", () => {
   logger.info("Redis client reconnecting...");
 });
 
-// Replace the existing matchQueue.process with these handlers:
-
 // Process handler for 'test-job' type jobs
 matchQueue.process("test-job", async (job) => {
   logger.info(`Processing test job ${job.id}`, {
@@ -229,6 +227,30 @@ if (!apiKey) {
 // Parse JSON bodies
 app.use(express.json());
 
+// Add CORS support
+app.use(cors());
+
+// Add logging middleware for all incoming requests
+app.use((req, res, next) => {
+  logger.info(`Incoming HTTP request:`, {
+    method: req.method,
+    url: req.url,
+    headers: {
+      contentType: req.headers["content-type"],
+      authorization: req.headers["authorization"]
+        ? "Present (masked)"
+        : "Missing",
+      host: req.headers["host"],
+      origin: req.headers["origin"],
+      userAgent: req.headers["user-agent"],
+    },
+    ip: req.ip,
+    query: req.query,
+    body: req.method === "POST" ? req.body : undefined,
+  });
+  next();
+});
+
 // Simple authentication middleware with enhanced logging
 const authenticate = (
   req: express.Request,
@@ -259,7 +281,30 @@ const authenticate = (
   next();
 };
 
-app.use(cors());
+// Add root route for better user experience
+app.get("/", (req, res) => {
+  res.send(`
+    <html>
+      <head>
+        <title>Agrospot Worker Service</title>
+        <style>
+          body { font-family: Arial, sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; }
+        </style>
+      </head>
+      <body>
+        <h1>Agrospot Worker Service</h1>
+        <p>The background processing service is running.</p>
+        <p>Available endpoints:</p>
+        <ul>
+          <li><a href="/health">/health</a> - Health check</li>
+          <li><a href="/api/queue-status">/api/queue-status</a> - Queue status</li>
+          <li><a href="/api/debug">/api/debug</a> - Debug information</li>
+          <li><a href="/manual">/manual</a> - Manual processing page</li>
+        </ul>
+      </body>
+    </html>
+  `);
+});
 
 // API route to add job to queue
 app.post("/api/process", async (req, res) => {
@@ -498,53 +543,7 @@ app.get("/health", (req, res) => {
   });
 });
 
-// Start server
-app.listen(port, () => {
-  logger.info(`Worker API running on port ${port}`);
-  logger.info("Agrospot worker service started successfully");
-});
-
-// Startup routine
-(async () => {
-  logger.info("Starting Agrospot worker...");
-
-  // Test database connection
-  await testDatabase();
-
-  // Clean any stalled jobs
-  await matchQueue.clean(0, "delayed");
-  await matchQueue.clean(0, "wait");
-  await matchQueue.clean(0, "active");
-
-  // Look for any quotations stuck in 'processing' state and requeue them
-  try {
-    const stuckQuotations = await prisma.quotation.findMany({
-      where: {
-        processingStatus: "processing",
-      },
-    });
-
-    if (stuckQuotations.length > 0) {
-      logger.info(
-        `Found ${stuckQuotations.length} stuck quotations, requeueing...`
-      );
-
-      for (const quotation of stuckQuotations) {
-        await matchQueue.add({
-          quotationId: quotation.id,
-          isRecovery: true,
-        });
-
-        logger.info(`Requeued quotation ${quotation.id}`);
-      }
-    }
-  } catch (error) {
-    logger.error("Failed to recover stuck quotations:", error);
-  }
-})();
-
-// Add this detailed debug endpoint
-// Simplified debug endpoint
+// Debug endpoint
 app.get("/api/debug", async (req, res) => {
   try {
     // Get current environment info
@@ -631,7 +630,7 @@ app.get("/api/debug", async (req, res) => {
   }
 });
 
-// Add a manual trigger endpoint for testing
+// Manual force-process endpoint
 app.post("/api/force-process/:quotationId", async (req, res) => {
   try {
     const quotationId = parseInt(req.params.quotationId);
@@ -684,7 +683,7 @@ app.post("/api/force-process/:quotationId", async (req, res) => {
   }
 });
 
-// In your Railway worker, add a new endpoint:
+// Cron job endpoint
 app.get("/api/cron/process-pending-quotations", async (req, res) => {
   try {
     // Find quotations with 'pending' processing status
@@ -726,6 +725,7 @@ app.get("/api/cron/process-pending-quotations", async (req, res) => {
     });
   }
 });
+
 // Public endpoint to manually process a quotation (for testing)
 app.get("/api/manual-process/:quotationId", async (req, res) => {
   try {
@@ -768,6 +768,7 @@ app.get("/api/manual-process/:quotationId", async (req, res) => {
     });
   }
 });
+
 // Serve a simple HTML page for testing
 app.get("/manual", (req, res) => {
   res.send(`
@@ -809,6 +810,51 @@ app.get("/manual", (req, res) => {
     </html>
   `);
 });
+
+// Start server
+app.listen(port, () => {
+  logger.info(`Worker API running on port ${port}`);
+  logger.info("Agrospot worker service started successfully");
+});
+
+// Startup routine
+(async () => {
+  logger.info("Starting Agrospot worker...");
+
+  // Test database connection
+  await testDatabase();
+
+  // Clean any stalled jobs
+  await matchQueue.clean(0, "delayed");
+  await matchQueue.clean(0, "wait");
+  await matchQueue.clean(0, "active");
+
+  // Look for any quotations stuck in 'processing' state and requeue them
+  try {
+    const stuckQuotations = await prisma.quotation.findMany({
+      where: {
+        processingStatus: "processing",
+      },
+    });
+
+    if (stuckQuotations.length > 0) {
+      logger.info(
+        `Found ${stuckQuotations.length} stuck quotations, requeueing...`
+      );
+
+      for (const quotation of stuckQuotations) {
+        await matchQueue.add({
+          quotationId: quotation.id,
+          isRecovery: true,
+        });
+
+        logger.info(`Requeued quotation ${quotation.id}`);
+      }
+    }
+  } catch (error) {
+    logger.error("Failed to recover stuck quotations:", error);
+  }
+})();
 
 // Export for testing
 export { matchQueue, prisma, logger };
