@@ -3,6 +3,7 @@ import express from "express";
 import Bull from "bull";
 import { PrismaClient } from "@prisma/client";
 import winston from "winston";
+import cors from "cors";
 
 // Initialize logger
 const logger = winston.createLogger({
@@ -258,8 +259,17 @@ const authenticate = (
   next();
 };
 
+app.use(cors());
+
 // API route to add job to queue
 app.post("/api/process", async (req, res) => {
+  console.log("Raw request received:", {
+    headers: req.headers,
+    body: req.body,
+    ip: req.ip,
+    method: req.method,
+    path: req.path,
+  });
   // Log raw request details before authentication
   logger.info("Received raw API request:", {
     url: req.url,
