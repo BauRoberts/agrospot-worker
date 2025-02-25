@@ -11,6 +11,14 @@ export async function getTransportRate(distanceKm: number): Promise<number> {
     // Round up distance to nearest km
     const distance = Math.ceil(distanceKm);
 
+    // Apply fixed rates for distances >= 350 km
+    if (distance >= 400) {
+      return 33000; // Fixed rate for distances > 400 km
+    } else if (distance >= 350) {
+      return 26000; // Fixed rate for distances between 350-400 km
+    }
+
+    // For distances < 350 km, continue using the rate table
     // Find closest transport rate
     const transportRate = await prisma.transportRate.findFirst({
       where: {

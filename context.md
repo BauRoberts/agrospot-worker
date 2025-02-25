@@ -91,7 +91,7 @@ Administrators in Agrospot play a crucial role in maintaining market dynamics. T
 ## Repository Structure
 
 ```
-agrospot/
+agrospot(1st File)/
 ├── prisma/
 │   ├── schema.prisma           # Database schema
 │   ├── seed.ts                 # Database seeding
@@ -123,7 +123,8 @@ agrospot/
 │   │   ├── prisma.ts          # Database client
 │   │   └── utils/             # Utility functions
 │   └── types/                 # TypeScript types
-└── agrospot-worker/           # Background worker service
+
+agrospot-worker(2nd file)/           # Background worker service
     ├── src/
     │   ├── processors/        # Job processors
     │   ├── services/          # Worker services
@@ -374,3 +375,19 @@ BACKGROUND_PROCESSING_KEY
 - Configuration guides
 
 What are we doing now ?
+
+I want to know how we are calculating the transport cost! And then, well make some changes.
+
+We are going to change how we are calculating the cost of transportation! We are using a table right now with some fix rates in the mid part of the km and that rates we are using to the top! So my idea is to keep using the table as a fallback calculation.
+It would be nice to have an interface were u can setup different like in a table, inferior limit and superior limit in distance range and the price for that range that the calculator should use!
+Like this:
+Range KM Inferior Range KM Superior Price
+350 400 $30000
+
+And if u dont have setup a price range for a km use the table! The table must only be use if the price is not set below! So if u have a distance of 450 km it should the last price range setup manually! But if you price range is set up from 300 km above and a distance calculation is 250 km, you should use the table!
+
+Some thoughts i have! We made recent changes and the calculation is being done in the worker! But all the UI changes are in the main app that is in a differente file! Take this in account...
+
+Also i was thinkinh that maybe a possibility is making a UI that changes the transport rate table with some conditional in it! IDKK
+
+Lets chat about the different possiblies to do this!
