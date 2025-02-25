@@ -257,3 +257,14 @@ model TempGoogleUser {
 
   @@map("temp_google_users")
 }
+
+model TransportPriceRange {
+  id            Int      @id @default(autoincrement())
+  minDistance   Int      @map("min_distance")  // Minimum distance in km
+  maxDistance   Int      @map("max_distance")  // Maximum distance in km
+  ratePerTon    Decimal  @map("rate_per_ton") @db.Decimal(10,2)
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  @@map("transport_price_ranges")
+}

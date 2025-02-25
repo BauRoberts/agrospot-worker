@@ -11,15 +11,34 @@ export async function getTransportRate(distanceKm: number): Promise<number> {
     // Round up distance to nearest km
     const distance = Math.ceil(distanceKm);
 
-    // Apply fixed rates for distances >= 350 km
-    if (distance >= 400) {
-      return 33000; // Fixed rate for distances > 400 km
-    } else if (distance >= 350) {
-      return 26000; // Fixed rate for distances between 350-400 km
+    // 1. First, check if there's a custom price range that matches
+    const priceRange = await prisma.transportPriceRange.findFirst({
+      where: {
+        minDistance: { lte: distance },
+        maxDistance: { gte: distance },
+      },
+    });
+
+    if (priceRange) {
+      return Number(priceRange.ratePerTon);
     }
 
-    // For distances < 350 km, continue using the rate table
-    // Find closest transport rate
+    // 2. If no exact range match, check if there's a range with a lower minDistance
+    // that could apply (for distances beyond the defined ranges)
+    const fallbackRange = await prisma.transportPriceRange.findFirst({
+      where: {
+        minDistance: { lte: distance },
+      },
+      orderBy: {
+        maxDistance: "desc",
+      },
+    });
+
+    if (fallbackRange) {
+      return Number(fallbackRange.ratePerTon);
+    }
+
+    // 3. If no custom ranges apply, fall back to the existing table logic
     const transportRate = await prisma.transportRate.findFirst({
       where: {
         kilometers: {
@@ -35,7 +54,7 @@ export async function getTransportRate(distanceKm: number): Promise<number> {
       return Number(transportRate.ratePerTon);
     }
 
-    // If no rate found, fallback to closest rate or default value
+    // 4. Final fallback to closest rate or default value
     const defaultRate = await prisma.transportRate.findFirst({
       orderBy: {
         kilometers: "asc",
@@ -46,7 +65,7 @@ export async function getTransportRate(distanceKm: number): Promise<number> {
       return Number(defaultRate.ratePerTon);
     }
 
-    // Ultimate fallback
+    // 5. Ultimate fallback
     return distance * 10; // Very basic fallback rate
   } catch (error) {
     console.error("Error getting transport rate:", error);
