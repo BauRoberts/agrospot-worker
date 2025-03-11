@@ -1,12 +1,12 @@
+// agrospot-worker/src/processors/matching-processor.ts
 import { PrismaClient } from "@prisma/client";
 // Import Decimal from the runtime library instead
 import { Decimal } from "@prisma/client/runtime/library";
-import { routingService, RoutingService } from "./routing-service";
-import { getTransportRate } from "./transport-service";
-import { convertCurrency } from "./currency-service";
+import { routingService, RoutingService } from "../services/routing-service";
+import { getTransportRate } from "../services/transport-service";
+import { convertCurrency, getExchangeRate } from "../services/currency-service";
 
 // Use the global Prisma instance or create a new one if needed
-// This will be properly handled by the worker
 const prisma = new PrismaClient();
 
 const COMMISSION_RATE = 0.01;
@@ -91,6 +91,7 @@ interface MatchResult {
   };
   profitabilityVsReference: number;
   routeId?: number;
+  exchangeRateUsed?: number | null; // Added to track the exchange rate used
 }
 
 interface OpportunityWithRelations extends BaseOpportunity {
@@ -121,6 +122,11 @@ async function calculateMatchData(
     console.log(
       `Starting match calculation for opportunity ${opportunity.id} with quotation ${quotation.id}`
     );
+
+    // Fetch the exchange rate at the beginning of calculation
+    // to ensure consistent currency handling throughout this match
+    const exchangeRate = await getExchangeRate();
+    console.log(`Using exchange rate for calculation: ${exchangeRate} ARS/USD`);
 
     // Get route information
     console.log(
@@ -176,15 +182,19 @@ async function calculateMatchData(
 
       let pricePerTon;
       try {
-        // Convert price to ARS if needed
+        // Convert price to ARS if needed, using our fetched exchange rate
         if (opportunity.currency === "USD") {
           console.log(
             `Converting price from USD to ARS for opportunity ${opportunity.id}`
           );
-          pricePerTon = await convertCurrency(
-            Number(paymentOption.pricePerTon),
-            "USD",
-            "ARS"
+
+          // Use the exchange rate we already fetched
+          pricePerTon = Number(paymentOption.pricePerTon) * exchangeRate;
+
+          console.log(
+            `Converted price: ${Number(
+              paymentOption.pricePerTon
+            )} USD → ${pricePerTon} ARS (rate: ${exchangeRate})`
           );
         } else {
           pricePerTon = Number(paymentOption.pricePerTon);
@@ -214,6 +224,7 @@ async function calculateMatchData(
         transportationCost,
         pricePerTon,
         paymentOptionId: paymentOption.id,
+        exchangeRate: opportunity.currency === "USD" ? exchangeRate : null,
       });
 
       const matchResult: MatchResult = {
@@ -226,6 +237,7 @@ async function calculateMatchData(
         bestPaymentOptionId: paymentOption.id,
         commission: commission * Number(quotation.quantityTons),
         profitabilityVsReference: 0,
+        exchangeRateUsed: opportunity.currency === "USD" ? exchangeRate : null,
       };
 
       console.log(
@@ -308,6 +320,17 @@ async function saveMatchesToDatabase(
   );
 
   const matchPromises = realMatches.map(async (match) => {
+    // Store the exchange rate in a variable but don't use it in the Prisma query yet
+    // until the schema is updated
+    const exchangeRate = match.exchangeRateUsed;
+
+    // Log the exchange rate for debugging
+    if (exchangeRate) {
+      console.log(
+        `Exchange rate for match with opportunity ${match.opportunity.id}: ${exchangeRate}`
+      );
+    }
+
     const matchData = {
       quotation: {
         connect: { id: quotationId },
@@ -331,6 +354,8 @@ async function saveMatchesToDatabase(
         Number(match.opportunity.paymentOptions[0].pricePerTon || 0) *
           Number(match.opportunity.quantityTons || 0)
       ),
+      // Remove this line until the schema is updated
+      // exchangeRateUsed: match.exchangeRateUsed ? safeDecimal(match.exchangeRateUsed) : null,
     };
 
     try {

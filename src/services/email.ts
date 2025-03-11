@@ -1,4 +1,6 @@
+// agrospot-worker/src/services/email.ts
 import sgMail from "@sendgrid/mail";
+import { getExchangeRate } from "./currency-service";
 
 const SENDGRID_API_KEY = process.env.SENDGRID_API_KEY;
 const SENDER_EMAIL = "info@agrospot.com.ar";
@@ -6,6 +8,87 @@ const SENDER_EMAIL = "info@agrospot.com.ar";
 // Environment configuration
 const NODE_ENV = process.env.NODE_ENV || "development";
 const EMAIL_ENABLED = process.env.EMAIL_ENABLED !== "false";
+
+// Define TypeScript interfaces for data structures
+interface Location {
+  id: number;
+  city: string;
+  state: string | null;
+  country: string;
+  latitude: number;
+  longitude: number;
+  placeId: string;
+}
+
+interface Product {
+  id: number;
+  name: string;
+  category?: string;
+}
+
+interface PaymentOption {
+  id: number;
+  opportunityId: number;
+  pricePerTon: number | string;
+  paymentTermDays: number;
+  isReferenceBased?: boolean;
+  referenceDiff?: number | string;
+  referenceDiffType?: string;
+  referenceDiffCurrency?: string;
+}
+
+interface Opportunity {
+  id: number;
+  productId: number;
+  quantityTons: number | string;
+  status: string;
+  locationId: number;
+  name: string;
+  cellphone: string;
+  email: string;
+  quality?: string | null;
+  marketType: string;
+  currency: string;
+  location: Location;
+  product: Product;
+  paymentOptions: PaymentOption[];
+}
+
+interface Route {
+  distance: number;
+  duration: number;
+  geometry?: string;
+}
+
+interface Match {
+  opportunity: Opportunity;
+  distance: number;
+  score: number;
+  profitability: number;
+  transportationCost: number;
+  bestPaymentOptionId: number;
+  commission: number;
+  route: Route;
+  profitabilityVsReference: number;
+  routeId?: number;
+  exchangeRateUsed?: number | null;
+}
+
+interface Quotation {
+  id: number;
+  productId: number;
+  quantityTons: number | string;
+  location: Location;
+  product: Product;
+  name: string;
+  cellphone: string;
+  email: string;
+}
+
+// Configure SendGrid client
+if (SENDGRID_API_KEY) {
+  sgMail.setApiKey(SENDGRID_API_KEY);
+}
 
 // Get recipient emails based on environment
 function getRecipientEmails(): string[] {
@@ -31,32 +114,48 @@ function getRecipientEmails(): string[] {
   }
 }
 
-if (SENDGRID_API_KEY) {
-  sgMail.setApiKey(SENDGRID_API_KEY);
-}
-
-function formatCurrency(amount: number, currency: string): string {
+// Format currency - always in ARS regardless of original currency
+function formatCurrency(amount: number): string {
   return new Intl.NumberFormat("es-AR", {
     style: "currency",
-    currency: currency,
+    currency: "ARS",
     maximumFractionDigits: 0,
   }).format(amount);
 }
 
-function formatReferencePrice(match: any, matches: any[]): string {
+// Format original price with currency indicator
+function formatOriginalPrice(
+  amount: number,
+  currency: string,
+  exchangeRate: number
+): string {
+  if (currency === "USD") {
+    // For USD, show both the original USD and converted ARS
+    const formattedUSD = new Intl.NumberFormat("es-AR", {
+      style: "currency",
+      currency: "USD",
+      maximumFractionDigits: 0,
+    }).format(amount);
+
+    const arsAmount = amount * exchangeRate;
+    return `${formattedUSD} (${formatCurrency(arsAmount)})`;
+  } else {
+    // For ARS, just show the ARS format
+    return formatCurrency(amount);
+  }
+}
+
+function formatReferencePrice(match: Match, matches: Match[]): string {
   const rosarioMatch = matches.find((m) => m.opportunity.id === -1);
   if (!rosarioMatch) return "-";
 
   const referencePrice = Number(
     rosarioMatch.opportunity.paymentOptions[0].pricePerTon
   );
-  return `${formatCurrency(
-    referencePrice,
-    rosarioMatch.opportunity.currency
-  )}/tn`;
+  return `${formatCurrency(referencePrice)}/tn`;
 }
 
-function formatPriceDiscount(match: any): string {
+function formatPriceDiscount(match: Match): string {
   const paymentOption = match.opportunity.paymentOptions[0];
 
   if (!paymentOption.isReferenceBased) {
@@ -68,9 +167,7 @@ function formatPriceDiscount(match: any): string {
   }
 
   const amount = Number(paymentOption.referenceDiff);
-  return `${formatCurrency(amount, paymentOption.referenceDiffCurrency)} ${
-    paymentOption.referenceDiffCurrency
-  }`;
+  return `${formatCurrency(amount)}`;
 }
 
 function formatDistance(meters: number): string {
@@ -78,9 +175,10 @@ function formatDistance(meters: number): string {
 }
 
 function calculateRosarioDifference(
-  match: any,
-  matches: any[],
-  quotation: any
+  match: Match,
+  matches: Match[],
+  quotation: Quotation,
+  exchangeRate: number
 ): string {
   const rosarioMatch = matches.find((m) => m.opportunity.id === -1);
   if (!rosarioMatch) return "-";
@@ -88,30 +186,54 @@ function calculateRosarioDifference(
   const paymentOption = match.opportunity.paymentOptions[0];
   const rosarioPaymentOption = rosarioMatch.opportunity.paymentOptions[0];
 
+  // Always calculate in ARS
+  let pricePerTonInARS = Number(paymentOption.pricePerTon);
+  if (match.opportunity.currency === "USD") {
+    pricePerTonInARS = pricePerTonInARS * exchangeRate;
+  }
+
   const matchFinalPrice =
-    Number(paymentOption.pricePerTon) -
+    pricePerTonInARS -
     match.transportationCost / Number(quotation.quantityTons);
+
   const rosarioFinalPrice =
     Number(rosarioPaymentOption.pricePerTon) -
     rosarioMatch.transportationCost / Number(quotation.quantityTons);
 
   const difference = matchFinalPrice - rosarioFinalPrice;
-  return formatCurrency(difference, match.opportunity.currency);
+
+  // Always return in ARS
+  return formatCurrency(difference);
 }
 
 function generateTableRowHTML(
-  match: any,
+  match: Match,
   isReferencePrice: boolean = false,
-  quotation: any,
-  matches: any[]
+  quotation: Quotation,
+  matches: Match[],
+  exchangeRate: number
 ): string {
   const opportunity = match.opportunity;
   const paymentOption = opportunity.paymentOptions[0];
   const transportCostPerTon =
     match.transportationCost / Number(quotation.quantityTons);
   const commissionPerTon = match.commission / Number(quotation.quantityTons);
+
+  // Calculate the final price per ton in ARS
+  let pricePerTonInARS = Number(paymentOption.pricePerTon);
+  if (opportunity.currency === "USD") {
+    pricePerTonInARS = pricePerTonInARS * exchangeRate;
+  }
+
   const finalPricePerTon =
-    Number(paymentOption.pricePerTon) - transportCostPerTon - commissionPerTon;
+    pricePerTonInARS - transportCostPerTon - commissionPerTon;
+
+  // Original price display (includes currency indicator for USD)
+  const priceDisplay = formatOriginalPrice(
+    Number(paymentOption.pricePerTon),
+    opportunity.currency,
+    exchangeRate
+  );
 
   return `
     <tr style="${
@@ -129,48 +251,100 @@ function generateTableRowHTML(
       <td style="padding: 12px; text-align: right; font-family: Roboto, 'Segoe UI', 'Helvetica Neue', sans-serif;">${formatPriceDiscount(
         match
       )}</td>
-      <td style="padding: 12px; text-align: right; font-family: Roboto, 'Segoe UI', 'Helvetica Neue', sans-serif;">${formatCurrency(
-        Number(paymentOption.pricePerTon),
-        opportunity.currency
-      )}</td>
+      <td style="padding: 12px; text-align: right; font-family: Roboto, 'Segoe UI', 'Helvetica Neue', sans-serif;">${priceDisplay}</td>
       <td style="padding: 12px; text-align: right; font-family: Roboto, 'Segoe UI', 'Helvetica Neue', sans-serif;">${formatDistance(
         match.route.distance
       )}</td>
       <td style="padding: 12px; text-align: right; font-family: Roboto, 'Segoe UI', 'Helvetica Neue', sans-serif;">${formatCurrency(
-        transportCostPerTon,
-        opportunity.currency
+        transportCostPerTon
       )}</td>
       <td style="padding: 12px; text-align: right; font-family: Roboto, 'Segoe UI', 'Helvetica Neue', sans-serif;">${formatCurrency(
-        commissionPerTon,
-        opportunity.currency
+        commissionPerTon
       )}</td>
       <td style="padding: 12px; text-align: right; font-family: Roboto, 'Segoe UI', 'Helvetica Neue', sans-serif;">${
         paymentOption.paymentTermDays
       }</td>
       <td style="padding: 12px; text-align: right; font-weight: bold; font-family: Roboto, 'Segoe UI', 'Helvetica Neue', sans-serif;">${formatCurrency(
-        finalPricePerTon,
-        opportunity.currency
+        finalPricePerTon
       )}</td>
       <td style="padding: 12px; text-align: right; font-weight: bold; font-family: Roboto, 'Segoe UI', 'Helvetica Neue', sans-serif;">${calculateRosarioDifference(
         match,
         matches,
-        quotation
+        quotation,
+        exchangeRate
       )}</td>
     </tr>
   `;
 }
 
-function generateEmailHTML(quotation: any, matches: any[]): string {
-  const sortedMatches = [...matches]
+async function generateEmailHTML(
+  quotation: Quotation,
+  matches: Match[]
+): Promise<string> {
+  // Get the current exchange rate directly from the service
+  const exchangeRate = await getExchangeRate();
+
+  // First convert all values to ARS for filtering
+  const matchesWithConvertedValues = matches.map((match) => {
+    const clone = { ...match };
+
+    // Convert profitability to ARS if needed
+    if (match.opportunity.currency === "USD") {
+      clone.profitability = match.profitability * exchangeRate;
+    }
+
+    return clone;
+  });
+
+  const sortedMatches = [...matchesWithConvertedValues]
     .filter((match) => {
       if (match.opportunity.id === -1) return true; // Keep Rosario
-      const difference = calculateRosarioDifference(match, matches, quotation);
-      return (
-        difference !== "-" &&
-        parseFloat(difference.replace(/[^0-9.-]+/g, "")) > 0
+
+      // Calculate difference with Rosario entirely in ARS
+      const rosarioMatch = matches.find((m) => m.opportunity.id === -1);
+      if (!rosarioMatch) return false;
+
+      const paymentOption = match.opportunity.paymentOptions[0];
+      const rosarioPaymentOption = rosarioMatch.opportunity.paymentOptions[0];
+
+      // Convert to ARS if needed
+      let pricePerTonInARS = Number(paymentOption.pricePerTon);
+      if (match.opportunity.currency === "USD") {
+        pricePerTonInARS = pricePerTonInARS * exchangeRate;
+      }
+
+      const matchFinalPrice =
+        pricePerTonInARS -
+        match.transportationCost / Number(quotation.quantityTons);
+
+      const rosarioFinalPrice =
+        Number(rosarioPaymentOption.pricePerTon) -
+        rosarioMatch.transportationCost / Number(quotation.quantityTons);
+
+      const difference = matchFinalPrice - rosarioFinalPrice;
+
+      // Log the difference calculation
+      console.log(
+        `Difference vs Rosario for opportunity ${match.opportunity.id} (${
+          match.opportunity.currency
+        }): ${formatCurrency(difference)}`
       );
+
+      return difference > 0;
     })
     .sort((a, b) => b.profitability - a.profitability);
+
+  // Log how many matches passed the filter
+  console.log(
+    `Filtered to ${sortedMatches.length} matches with positive difference vs Rosario`
+  );
+
+  // Map back to original matches for rendering
+  const originalSortedMatches = sortedMatches
+    .map((sortedMatch) =>
+      matches.find((m) => m.opportunity.id === sortedMatch.opportunity.id)
+    )
+    .filter((m) => m !== undefined) as Match[];
 
   // Add environment banner for non-production environments
   const environmentBanner =
@@ -231,13 +405,14 @@ function generateEmailHTML(quotation: any, matches: any[]): string {
               </tr>
             </thead>
             <tbody>
-              ${sortedMatches
+              ${originalSortedMatches
                 .map((match) =>
                   generateTableRowHTML(
                     match,
                     match.opportunity.id === -1,
                     quotation,
-                    sortedMatches
+                    originalSortedMatches,
+                    exchangeRate
                   )
                 )
                 .join("")}
@@ -245,12 +420,11 @@ function generateEmailHTML(quotation: any, matches: any[]): string {
           </table>
         </div>
         
-        <!-- Dollar Rate Footer -->
+        <!-- Exchange Rate Footer -->
         <div style="text-align: right; margin-top: 20px; font-size: 12px; color: #6B7280;">
-          <p>Tipo de cambio utilizado: ${
-            process.env.USD_TO_ARS_RATE || 1000
-          } ARS/USD</p>
+          <p>Tipo de cambio utilizado: ${formatCurrency(exchangeRate)}/USD</p>
         </div>
+        
         <!-- Contact Info Footer -->
         <div style="text-align: right; margin-top: 20px; font-size: 12px; color: #6B7280;">
           <p>Nombre: ${quotation.name}</p>
@@ -265,6 +439,7 @@ function generateEmailHTML(quotation: any, matches: any[]): string {
           <p>Environment: ${NODE_ENV}</p>
           <p>Notification Recipients: ${getRecipientEmails().join(", ")}</p>
           <p>Generated: ${new Date().toISOString()}</p>
+          <p>Exchange Rate: ${exchangeRate}</p>
         </div>`
             : ""
         }
@@ -274,7 +449,10 @@ function generateEmailHTML(quotation: any, matches: any[]): string {
   `;
 }
 
-export async function sendMatchNotification(quotation: any, matches: any[]) {
+export async function sendMatchNotification(
+  quotation: Quotation,
+  matches: Match[]
+) {
   try {
     // Skip sending email if disabled in environment
     if (!EMAIL_ENABLED) {
@@ -307,7 +485,7 @@ export async function sendMatchNotification(quotation: any, matches: any[]) {
       to: recipientEmails,
       from: { email: SENDER_EMAIL, name: "Agrospot" },
       subject: `${subjectPrefix}Agrospot: Cotización de ${quotation.quantityTons}tn en ${quotation.location.city}`,
-      html: generateEmailHTML(quotation, validMatches),
+      html: await generateEmailHTML(quotation, validMatches),
     };
 
     console.log(
