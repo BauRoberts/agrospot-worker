@@ -76,10 +76,11 @@ interface Match {
 
 interface Quotation {
   id: number;
-  productId: number;
+  // Remove productId from the interface as it's not present in the actual data
+  // productId: number;
+  product: Product; // Instead, the product is passed as a nested object
   quantityTons: number | string;
   location: Location;
-  product: Product;
   name: string;
   cellphone: string;
   email: string;
