@@ -1,6 +1,7 @@
 // agrospot-worker/src/services/email.ts
 import sgMail from "@sendgrid/mail";
 import { getExchangeRate } from "./currency-service";
+import { Match, Quotation, toNumber } from "./types";
 
 const SENDGRID_API_KEY = process.env.SENDGRID_API_KEY;
 const SENDER_EMAIL = "info@agrospot.com.ar";
@@ -8,83 +9,6 @@ const SENDER_EMAIL = "info@agrospot.com.ar";
 // Environment configuration
 const NODE_ENV = process.env.NODE_ENV || "development";
 const EMAIL_ENABLED = process.env.EMAIL_ENABLED !== "false";
-
-// Define TypeScript interfaces for data structures
-interface Location {
-  id: number;
-  city: string;
-  state: string | null;
-  country: string;
-  latitude: number;
-  longitude: number;
-  placeId: string;
-}
-
-interface Product {
-  id: number;
-  name: string;
-  category?: string;
-}
-
-interface PaymentOption {
-  id: number;
-  opportunityId: number;
-  pricePerTon: number | string;
-  paymentTermDays: number;
-  isReferenceBased?: boolean;
-  referenceDiff?: number | string;
-  referenceDiffType?: string;
-  referenceDiffCurrency?: string;
-}
-
-interface Opportunity {
-  id: number;
-  productId: number;
-  quantityTons: number | string;
-  status: string;
-  locationId: number;
-  name: string;
-  cellphone: string;
-  email: string;
-  quality?: string | null;
-  marketType: string;
-  currency: string;
-  location: Location;
-  product: Product;
-  paymentOptions: PaymentOption[];
-}
-
-interface Route {
-  distance: number;
-  duration: number;
-  geometry?: string;
-}
-
-interface Match {
-  opportunity: Opportunity;
-  distance: number;
-  score: number;
-  profitability: number;
-  transportationCost: number;
-  bestPaymentOptionId: number;
-  commission: number;
-  route: Route;
-  profitabilityVsReference: number;
-  routeId?: number;
-  exchangeRateUsed?: number | null;
-}
-
-interface Quotation {
-  id: number;
-  // Remove productId from the interface as it's not present in the actual data
-  // productId: number;
-  product: Product; // Instead, the product is passed as a nested object
-  quantityTons: number | string;
-  location: Location;
-  name: string;
-  cellphone: string;
-  email: string;
-}
 
 // Configure SendGrid client
 if (SENDGRID_API_KEY) {
@@ -150,7 +74,7 @@ function formatReferencePrice(match: Match, matches: Match[]): string {
   const rosarioMatch = matches.find((m) => m.opportunity.id === -1);
   if (!rosarioMatch) return "-";
 
-  const referencePrice = Number(
+  const referencePrice = toNumber(
     rosarioMatch.opportunity.paymentOptions[0].pricePerTon
   );
   return `${formatCurrency(referencePrice)}/tn`;
@@ -167,7 +91,7 @@ function formatPriceDiscount(match: Match): string {
     return `${paymentOption.referenceDiff}%`;
   }
 
-  const amount = Number(paymentOption.referenceDiff);
+  const amount = toNumber(paymentOption.referenceDiff ?? 0);
   return `${formatCurrency(amount)}`;
 }
 
@@ -187,19 +111,26 @@ function calculateRosarioDifference(
   const paymentOption = match.opportunity.paymentOptions[0];
   const rosarioPaymentOption = rosarioMatch.opportunity.paymentOptions[0];
 
-  // Always calculate in ARS
-  let pricePerTonInARS = Number(paymentOption.pricePerTon);
+  // Get the exchange rate used for this match (if any)
+  const exchangeRateToUse = match.exchangeRateUsed || exchangeRate;
+
+  // Calculate the proper price based on currency
+  let pricePerTonInARS = toNumber(paymentOption.pricePerTon);
   if (match.opportunity.currency === "USD") {
-    pricePerTonInARS = pricePerTonInARS * exchangeRate;
+    // If the opportunity is in USD, multiply by exchange rate to get ARS equivalent
+    pricePerTonInARS = pricePerTonInARS * exchangeRateToUse;
   }
 
+  // Safely handle null quantityTons
+  const quotationQuantity = toNumber(quotation.quantityTons);
+  if (quotationQuantity === 0) return "-"; // Avoid division by zero
+
   const matchFinalPrice =
-    pricePerTonInARS -
-    match.transportationCost / Number(quotation.quantityTons);
+    pricePerTonInARS - match.transportationCost / quotationQuantity;
 
   const rosarioFinalPrice =
-    Number(rosarioPaymentOption.pricePerTon) -
-    rosarioMatch.transportationCost / Number(quotation.quantityTons);
+    toNumber(rosarioPaymentOption.pricePerTon) -
+    rosarioMatch.transportationCost / quotationQuantity;
 
   const difference = matchFinalPrice - rosarioFinalPrice;
 
@@ -216,14 +147,22 @@ function generateTableRowHTML(
 ): string {
   const opportunity = match.opportunity;
   const paymentOption = opportunity.paymentOptions[0];
-  const transportCostPerTon =
-    match.transportationCost / Number(quotation.quantityTons);
-  const commissionPerTon = match.commission / Number(quotation.quantityTons);
+
+  // Safely handle null quantityTons
+  const quotationQuantity = toNumber(quotation.quantityTons);
+  if (quotationQuantity === 0) {
+    // Handle the case where quantity is zero or null
+    return `<tr><td colspan="10">Invalid quotation quantity</td></tr>`;
+  }
+
+  const transportCostPerTon = match.transportationCost / quotationQuantity;
+  const commissionPerTon = match.commission / quotationQuantity;
 
   // Calculate the final price per ton in ARS
-  let pricePerTonInARS = Number(paymentOption.pricePerTon);
+  let pricePerTonInARS = toNumber(paymentOption.pricePerTon);
   if (opportunity.currency === "USD") {
-    pricePerTonInARS = pricePerTonInARS * exchangeRate;
+    pricePerTonInARS =
+      pricePerTonInARS * (match.exchangeRateUsed || exchangeRate);
   }
 
   const finalPricePerTon =
@@ -231,7 +170,7 @@ function generateTableRowHTML(
 
   // Original price display (includes currency indicator for USD)
   const priceDisplay = formatOriginalPrice(
-    Number(paymentOption.pricePerTon),
+    toNumber(paymentOption.pricePerTon),
     opportunity.currency,
     exchangeRate
   );
@@ -308,19 +247,22 @@ async function generateEmailHTML(
       const paymentOption = match.opportunity.paymentOptions[0];
       const rosarioPaymentOption = rosarioMatch.opportunity.paymentOptions[0];
 
+      // Safely handle null values in quantityTons
+      const quotationQuantity = toNumber(quotation.quantityTons);
+      if (quotationQuantity === 0) return false; // Skip if quantity is zero or null
+
       // Convert to ARS if needed
-      let pricePerTonInARS = Number(paymentOption.pricePerTon);
+      let pricePerTonInARS = toNumber(paymentOption.pricePerTon);
       if (match.opportunity.currency === "USD") {
         pricePerTonInARS = pricePerTonInARS * exchangeRate;
       }
 
       const matchFinalPrice =
-        pricePerTonInARS -
-        match.transportationCost / Number(quotation.quantityTons);
+        pricePerTonInARS - match.transportationCost / quotationQuantity;
 
       const rosarioFinalPrice =
-        Number(rosarioPaymentOption.pricePerTon) -
-        rosarioMatch.transportationCost / Number(quotation.quantityTons);
+        toNumber(rosarioPaymentOption.pricePerTon) -
+        rosarioMatch.transportationCost / quotationQuantity;
 
       const difference = matchFinalPrice - rosarioFinalPrice;
 
@@ -355,6 +297,9 @@ async function generateEmailHTML(
       </div>`
       : "";
 
+  // Safe handling for quantityTons that might be null
+  const quotationTons = toNumber(quotation.quantityTons);
+
   return `
     <!DOCTYPE html>
     <html>
@@ -382,9 +327,9 @@ async function generateEmailHTML(
             quotation.name
           } por llenar tu cotización!</h1>
           <p style="font-size: 12px; color: #4B5563; margin: 0; font-family: Roboto, 'Segoe UI', 'Helvetica Neue', sans-serif;">
-            Para tu cotización de ${quotation.product.name} de ${
-    quotation.quantityTons
-  } toneladas encontramos estas oportunidades comerciales en el mercado local.
+            Para tu cotización de ${
+              quotation.product.name
+            } de ${quotationTons} toneladas encontramos estas oportunidades comerciales en el mercado local.
           </p>
         </div>
 
@@ -485,7 +430,9 @@ export async function sendMatchNotification(
     const msg = {
       to: recipientEmails,
       from: { email: SENDER_EMAIL, name: "Agrospot" },
-      subject: `${subjectPrefix}Agrospot: Cotización de ${quotation.quantityTons}tn en ${quotation.location.city}`,
+      subject: `${subjectPrefix}Agrospot: Cotización de ${toNumber(
+        quotation.quantityTons
+      )}tn en ${quotation.location.city}`,
       html: await generateEmailHTML(quotation, validMatches),
     };
 

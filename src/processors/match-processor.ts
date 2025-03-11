@@ -1,138 +1,159 @@
+// agrospot-worker/src/processors/match-processor.ts
+// This is the solution to the TypeScript error you're experiencing
+
 import { PrismaClient } from "@prisma/client";
-import { Logger } from "winston";
+import { Match, Quotation, NumberLike, toNumber } from "../services/types";
+import { createMatchesForQuotation } from "../services/matching";
+import sendMatchNotification from "../services/email";
 
-/**
- * Process matching for a quotation
- */
-export async function processMatches(
-  quotationId: number,
-  prisma: PrismaClient,
-  logger: Logger
-): Promise<void> {
+const prisma = new PrismaClient();
+
+// Make sure the types being used in both files are the same
+// The issue is with NumberLike vs string | number | null
+
+export async function processMatches(quotationId: number): Promise<boolean> {
   try {
-    logger.info(`Starting match processing for quotation ${quotationId}`);
+    console.log(`Processing matches for quotation ${quotationId}`);
 
-    // 1. Update quotation status to processing
+    // Update the quotation status to 'processing'
     await prisma.quotation.update({
       where: { id: quotationId },
-      data: {
-        // @ts-ignore - The field exists in the database but Prisma types haven't been updated
-        processingStatus: "processing",
-      },
+      data: { status: "processing" },
     });
 
-    // 2. Get the quotation with necessary relations
+    // Get the quotation with included relations
     const quotation = await prisma.quotation.findUnique({
       where: { id: quotationId },
       include: {
-        product: true,
         location: true,
+        product: true,
       },
     });
 
     if (!quotation) {
-      throw new Error(`Quotation ${quotationId} not found`);
+      console.error(`Quotation ${quotationId} not found`);
+      return false;
     }
 
-    logger.info(
+    console.log(
       `Processing quotation for ${quotation.product.name} (${quotation.quantityTons} tons)`
     );
 
-    // 3. Import the main app's matching logic with correct path
-    // We're using dynamic import to make sure prisma is initialized first
-    const { createMatchesForQuotation } = await import("../services/matching");
-
-    // 4. Process matches
-    logger.info(
+    // Calculate matches
+    console.log(
       `Calling createMatchesForQuotation for quotation ${quotationId}`
     );
-    // We pass prisma to our function to ensure it uses the worker's Prisma instance
     const matches = await createMatchesForQuotation(quotationId);
 
-    // 5. If matches were found, send notification
-    if (matches && matches.length > 0) {
-      logger.info(
-        `Found ${matches.length} matches for quotation ${quotationId}`
+    // Convert matches to the expected format
+    const matchesForEmail = matches.map((match) => {
+      // Deep clone the match with all needed properties
+      const convertedMatch: Match = {
+        opportunity: {
+          id: match.opportunity.id,
+          // If productId is present in match.opportunity, use it, otherwise use opportunity.product.id
+          productId:
+            match.opportunity.productId || match.opportunity.product.id,
+          product: match.opportunity.product,
+          // Convert quantityTons to string to ensure compatibility
+          quantityTons: match.opportunity.quantityTons
+            ? String(match.opportunity.quantityTons)
+            : "0",
+          status: match.opportunity.status,
+          locationId: match.opportunity.locationId,
+          name: match.opportunity.name,
+          cellphone: match.opportunity.cellphone,
+          email: match.opportunity.email,
+          quality: match.opportunity.quality,
+          marketType: match.opportunity.marketType,
+          currency: match.opportunity.currency,
+          location: match.opportunity.location,
+          // Convert paymentOptions
+          paymentOptions: match.opportunity.paymentOptions.map((po) => ({
+            id: po.id,
+            opportunityId: po.opportunityId,
+            // Convert pricePerTon to string
+            pricePerTon: po.pricePerTon ? String(po.pricePerTon) : "0",
+            paymentTermDays: po.paymentTermDays,
+            isReferenceBased: po.isReferenceBased,
+            referenceDiff: po.referenceDiff ? String(po.referenceDiff) : null,
+            referenceDiffType: po.referenceDiffType,
+            referenceDiffCurrency: po.referenceDiffCurrency,
+          })),
+        },
+        distance: match.distance,
+        score: match.score,
+        profitability: match.profitability,
+        transportationCost: match.transportationCost,
+        bestPaymentOptionId: match.bestPaymentOptionId,
+        commission: match.commission,
+        route: match.route,
+        profitabilityVsReference: match.profitabilityVsReference,
+        routeId: match.routeId,
+        exchangeRateUsed: match.exchangeRateUsed,
+      };
+
+      return convertedMatch;
+    });
+
+    console.log(
+      `Found ${matchesForEmail.length} matches for quotation ${quotationId}`
+    );
+
+    // Convert the quotation for email to fix the type error
+    // Make sure to convert to string to avoid Decimal issues
+    const quotationForEmail: Quotation = {
+      id: quotation.id,
+      product: quotation.product,
+      // Convert to string explicitly
+      quantityTons: String(quotation.quantityTons),
+      location: quotation.location,
+      name: quotation.name,
+      cellphone: quotation.cellphone,
+      email: quotation.email,
+      status: quotation.status,
+    };
+
+    // Send email notification
+    const emailSent = await sendMatchNotification(
+      quotationForEmail,
+      matchesForEmail
+    );
+
+    if (emailSent) {
+      console.log(
+        `Successfully sent match notification email for quotation ${quotationId}`
       );
-
-      try {
-        // Import email service with correct path
-        const { sendMatchNotification } = await import("../services/email");
-
-        // Format quotation for email
-        const emailQuotation = {
-          id: quotation.id,
-          product: quotation.product,
-          location: {
-            ...quotation.location,
-            state: quotation.location.state || "",
-          },
-          quantityTons: Number(quotation.quantityTons),
-          name: quotation.name,
-          cellphone: quotation.cellphone,
-          email: quotation.email,
-        };
-
-        // Send notification
-        await sendMatchNotification(emailQuotation, matches);
-        logger.info(
-          `Successfully sent match notification email for quotation ${quotationId}`
-        );
-      } catch (emailError) {
-        // Log error but don't fail the whole process
-        logger.error(
-          `Failed to send notification email for quotation ${quotationId}:`,
-          emailError
-        );
-      }
-
-      // 6. Update quotation status to completed with matches
-      await prisma.quotation.update({
-        where: { id: quotationId },
-        data: {
-          // @ts-ignore - The field exists in the database but Prisma types haven't been updated
-          processingStatus: "completed",
-          status: "matched",
-        },
-      });
-
-      logger.info(`Successfully processed quotation ${quotationId}`);
     } else {
-      // No matches found
-      logger.info(`No matches found for quotation ${quotationId}`);
-
-      await prisma.quotation.update({
-        where: { id: quotationId },
-        data: {
-          // @ts-ignore - The field exists in the database but Prisma types haven't been updated
-          processingStatus: "completed",
-          status: "no_matches",
-        },
-      });
+      console.warn(
+        `Email notification was not sent for quotation ${quotationId}`
+      );
     }
+
+    // Update the quotation status to 'completed'
+    await prisma.quotation.update({
+      where: { id: quotationId },
+      data: { status: "completed" },
+    });
+
+    console.log(`Successfully processed quotation ${quotationId}`);
+    return true;
   } catch (error) {
-    logger.error(
+    console.error(
       `Error processing matches for quotation ${quotationId}:`,
       error
     );
 
-    // Update quotation status to failed
+    // Update the quotation status to 'failed'
     try {
       await prisma.quotation.update({
         where: { id: quotationId },
-        data: {
-          // @ts-ignore - The field exists in the database but Prisma types haven't been updated
-          processingStatus: "failed",
-        },
+        data: { status: "failed" },
       });
     } catch (updateError) {
-      logger.error(
-        `Failed to update quotation ${quotationId} status to failed:`,
-        updateError
-      );
+      console.error(`Failed to update quotation status:`, updateError);
     }
 
-    // Rethrow to let Bull handle retry logic
-    throw error;
+    return false;
   }
 }

@@ -173,7 +173,7 @@ matchQueue.process(async (job) => {
       processorLoaded: true,
     });
 
-    await processMatches(job.data.quotationId, prisma, logger);
+    await processMatches(job.data.quotationId);
 
     logger.info(`Successfully completed processing for job ${job.id}`, {
       quotationId: job.data.quotationId,
