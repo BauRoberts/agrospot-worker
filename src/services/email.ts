@@ -1,7 +1,5 @@
-// agrospot-worker/src/services/email.ts
 import sgMail from "@sendgrid/mail";
 import { getExchangeRate } from "./currency-service";
-import { Match, Quotation, toNumber } from "./types";
 
 const SENDGRID_API_KEY = process.env.SENDGRID_API_KEY;
 const SENDER_EMAIL = "info@agrospot.com.ar";
@@ -70,7 +68,30 @@ function formatOriginalPrice(
   }
 }
 
-function formatReferencePrice(match: Match, matches: Match[]): string {
+// This function handles any type of numerical input and converts it to a number
+function toNumber(value: any): number {
+  if (value === null || value === undefined) {
+    return 0;
+  }
+
+  if (typeof value === "number") {
+    return value;
+  }
+
+  if (typeof value === "string") {
+    return parseFloat(value) || 0;
+  }
+
+  // Handle any other type by converting to string first
+  try {
+    return Number(String(value)) || 0;
+  } catch (e) {
+    console.error("Error converting value to number:", e);
+    return 0;
+  }
+}
+
+function formatReferencePrice(match: any, matches: any[]): string {
   const rosarioMatch = matches.find((m) => m.opportunity.id === -1);
   if (!rosarioMatch) return "-";
 
@@ -80,7 +101,7 @@ function formatReferencePrice(match: Match, matches: Match[]): string {
   return `${formatCurrency(referencePrice)}/tn`;
 }
 
-function formatPriceDiscount(match: Match): string {
+function formatPriceDiscount(match: any): string {
   const paymentOption = match.opportunity.paymentOptions[0];
 
   if (!paymentOption.isReferenceBased) {
@@ -91,7 +112,7 @@ function formatPriceDiscount(match: Match): string {
     return `${paymentOption.referenceDiff}%`;
   }
 
-  const amount = toNumber(paymentOption.referenceDiff ?? 0);
+  const amount = toNumber(paymentOption.referenceDiff);
   return `${formatCurrency(amount)}`;
 }
 
@@ -100,9 +121,9 @@ function formatDistance(meters: number): string {
 }
 
 function calculateRosarioDifference(
-  match: Match,
-  matches: Match[],
-  quotation: Quotation,
+  match: any,
+  matches: any[],
+  quotation: any,
   exchangeRate: number
 ): string {
   const rosarioMatch = matches.find((m) => m.opportunity.id === -1);
@@ -139,10 +160,10 @@ function calculateRosarioDifference(
 }
 
 function generateTableRowHTML(
-  match: Match,
+  match: any,
   isReferencePrice: boolean = false,
-  quotation: Quotation,
-  matches: Match[],
+  quotation: any,
+  matches: any[],
   exchangeRate: number
 ): string {
   const opportunity = match.opportunity;
@@ -218,8 +239,8 @@ function generateTableRowHTML(
 }
 
 async function generateEmailHTML(
-  quotation: Quotation,
-  matches: Match[]
+  quotation: any,
+  matches: any[]
 ): Promise<string> {
   // Get the current exchange rate directly from the service
   const exchangeRate = await getExchangeRate();
@@ -287,7 +308,7 @@ async function generateEmailHTML(
     .map((sortedMatch) =>
       matches.find((m) => m.opportunity.id === sortedMatch.opportunity.id)
     )
-    .filter((m) => m !== undefined) as Match[];
+    .filter((m) => m !== undefined) as any[];
 
   // Add environment banner for non-production environments
   const environmentBanner =
@@ -395,10 +416,7 @@ async function generateEmailHTML(
   `;
 }
 
-export async function sendMatchNotification(
-  quotation: Quotation,
-  matches: Match[]
-) {
+export async function sendMatchNotification(quotation: any, matches: any[]) {
   try {
     // Skip sending email if disabled in environment
     if (!EMAIL_ENABLED) {
