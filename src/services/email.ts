@@ -101,19 +101,35 @@ function formatReferencePrice(match: any, matches: any[]): string {
   return `${formatCurrency(referencePrice)}/tn`;
 }
 
+// Updated to handle both percentage and fixed amount adjustments
 function formatPriceDiscount(match: any): string {
   const paymentOption = match.opportunity.paymentOptions[0];
 
   if (!paymentOption.isReferenceBased) {
-    return "";
+    return ""; // No discount for fixed price
   }
 
+  // Check the adjustment type
   if (paymentOption.referenceDiffType === "percentage") {
-    return `${paymentOption.referenceDiff}%`;
-  }
+    // For percentage adjustments, format with % sign
+    const adjustmentPercent = toNumber(paymentOption.referenceDiff);
+    const sign = adjustmentPercent >= 0 ? "+" : ""; // Add + sign for positive adjustments
+    return `${sign}${adjustmentPercent}%`;
+  } else {
+    // For fixed amount adjustments
+    const amount = toNumber(paymentOption.referenceDiff);
+    const sign = amount >= 0 ? "+" : ""; // Add + sign for positive adjustments
 
-  const amount = toNumber(paymentOption.referenceDiff);
-  return `${formatCurrency(amount)}`;
+    // Show the currency with the fixed amount
+    const currency =
+      paymentOption.referenceDiffCurrency || match.opportunity.currency;
+
+    if (currency === "USD") {
+      return `${sign}USD ${Math.abs(amount)}`;
+    } else {
+      return `${sign}${formatCurrency(amount)}`;
+    }
+  }
 }
 
 function formatDistance(meters: number): string {
@@ -155,8 +171,11 @@ function calculateRosarioDifference(
 
   const difference = matchFinalPrice - rosarioFinalPrice;
 
+  // Add a plus sign for positive differences
+  const sign = difference > 0 ? "+" : "";
+
   // Always return in ARS
-  return formatCurrency(difference);
+  return `${sign}${formatCurrency(Math.abs(difference))}`;
 }
 
 function generateTableRowHTML(
@@ -196,44 +215,66 @@ function generateTableRowHTML(
     exchangeRate
   );
 
+  // Determine background color based on match type
+  let backgroundColor = "white";
+  let textColor = "inherit";
+
+  if (isReferencePrice) {
+    backgroundColor = "#94B0AB";
+    textColor = "white";
+  } else if (paymentOption.isReferenceBased) {
+    // Lighter background for reference-based prices
+    backgroundColor = "#f0f7f6";
+  }
+
+  // Create a custom tag for fixed or reference pricing
+  const pricingTypeTag = paymentOption.isReferenceBased
+    ? `<span style="font-size: 10px; background-color: #e0f2f1; color: #00796b; padding: 2px 4px; border-radius: 4px; margin-left: 4px;">Ref</span>`
+    : `<span style="font-size: 10px; background-color: #f0f4fa; color: #3b5998; padding: 2px 4px; border-radius: 4px; margin-left: 4px;">Fijo</span>`;
+
   return `
-    <tr style="${
-      isReferencePrice
-        ? "background-color: #94B0AB; color: white;"
-        : "background-color: white;"
-    } border-bottom: 1px solid #e5e7eb;">
-      <td style="padding: 12px; text-align: left; font-family: Roboto, 'Segoe UI', 'Helvetica Neue', sans-serif;">${
-        opportunity.location.city
-      }</td>
-      <td style="padding: 12px; text-align: right; font-family: Roboto, 'Segoe UI', 'Helvetica Neue', sans-serif;">${formatReferencePrice(
-        match,
-        matches
-      )}</td>
-      <td style="padding: 12px; text-align: right; font-family: Roboto, 'Segoe UI', 'Helvetica Neue', sans-serif;">${formatPriceDiscount(
-        match
-      )}</td>
-      <td style="padding: 12px; text-align: right; font-family: Roboto, 'Segoe UI', 'Helvetica Neue', sans-serif;">${priceDisplay}</td>
-      <td style="padding: 12px; text-align: right; font-family: Roboto, 'Segoe UI', 'Helvetica Neue', sans-serif;">${formatDistance(
-        match.route.distance
-      )}</td>
-      <td style="padding: 12px; text-align: right; font-family: Roboto, 'Segoe UI', 'Helvetica Neue', sans-serif;">${formatCurrency(
-        transportCostPerTon
-      )}</td>
-      <td style="padding: 12px; text-align: right; font-family: Roboto, 'Segoe UI', 'Helvetica Neue', sans-serif;">${formatCurrency(
-        commissionPerTon
-      )}</td>
-      <td style="padding: 12px; text-align: right; font-family: Roboto, 'Segoe UI', 'Helvetica Neue', sans-serif;">${
-        paymentOption.paymentTermDays
-      }</td>
-      <td style="padding: 12px; text-align: right; font-weight: bold; font-family: Roboto, 'Segoe UI', 'Helvetica Neue', sans-serif;">${formatCurrency(
-        finalPricePerTon
-      )}</td>
-      <td style="padding: 12px; text-align: right; font-weight: bold; font-family: Roboto, 'Segoe UI', 'Helvetica Neue', sans-serif;">${calculateRosarioDifference(
-        match,
-        matches,
-        quotation,
-        exchangeRate
-      )}</td>
+    <tr style="background-color: ${backgroundColor}; color: ${textColor}; border-bottom: 1px solid #e5e7eb;">
+      <td style="padding: 12px; text-align: left; font-family: Roboto, 'Segoe UI', 'Helvetica Neue', sans-serif;">
+        ${opportunity.location.city} 
+        ${isReferencePrice ? "" : pricingTypeTag}
+      </td>
+      <td style="padding: 12px; text-align: right; font-family: Roboto, 'Segoe UI', 'Helvetica Neue', sans-serif;">
+        ${formatReferencePrice(match, matches)}
+      </td>
+      <td style="padding: 12px; text-align: right; font-family: Roboto, 'Segoe UI', 'Helvetica Neue', sans-serif;">
+        ${formatPriceDiscount(match)}
+      </td>
+      <td style="padding: 12px; text-align: right; font-family: Roboto, 'Segoe UI', 'Helvetica Neue', sans-serif;">
+        ${priceDisplay}
+      </td>
+      <td style="padding: 12px; text-align: right; font-family: Roboto, 'Segoe UI', 'Helvetica Neue', sans-serif;">
+        ${formatDistance(match.route.distance)}
+      </td>
+      <td style="padding: 12px; text-align: right; font-family: Roboto, 'Segoe UI', 'Helvetica Neue', sans-serif;">
+        ${formatCurrency(transportCostPerTon)}
+      </td>
+      <td style="padding: 12px; text-align: right; font-family: Roboto, 'Segoe UI', 'Helvetica Neue', sans-serif;">
+        ${formatCurrency(commissionPerTon)}
+      </td>
+      <td style="padding: 12px; text-align: right; font-family: Roboto, 'Segoe UI', 'Helvetica Neue', sans-serif;">
+        ${paymentOption.paymentTermDays}
+      </td>
+      <td style="padding: 12px; text-align: right; font-weight: bold; font-family: Roboto, 'Segoe UI', 'Helvetica Neue', sans-serif;">
+        ${formatCurrency(finalPricePerTon)}
+      </td>
+      <td style="padding: 12px; text-align: right; font-weight: bold; font-family: Roboto, 'Segoe UI', 'Helvetica Neue', sans-serif; 
+        ${
+          calculateRosarioDifference(
+            match,
+            matches,
+            quotation,
+            exchangeRate
+          ).startsWith("+")
+            ? "color: #0d9488;"
+            : "color: #ef4444;"
+        }">
+        ${calculateRosarioDifference(match, matches, quotation, exchangeRate)}
+      </td>
     </tr>
   `;
 }
@@ -354,6 +395,18 @@ async function generateEmailHTML(
           </p>
         </div>
 
+        <!-- Price Legend -->
+        <div style="margin-bottom: 20px; font-size: 12px; color: #4B5563;">
+          <div style="display: inline-block; margin-right: 15px;">
+            <span style="font-size: 10px; background-color: #e0f2f1; color: #00796b; padding: 2px 4px; border-radius: 4px; margin-right: 4px;">Ref</span>
+            <span>Precio basado en referencia</span>
+          </div>
+          <div style="display: inline-block;">
+            <span style="font-size: 10px; background-color: #f0f4fa; color: #3b5998; padding: 2px 4px; border-radius: 4px; margin-right: 4px;">Fijo</span>
+            <span>Precio fijo</span>
+          </div>
+        </div>
+
         <!-- Table -->
         <div style="overflow-x: auto; background-color: white; border-radius: 16px; box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1);">
           <table width="100%" cellpadding="0" cellspacing="0" style="border-collapse: collapse; min-width: 800px;">
@@ -361,7 +414,7 @@ async function generateEmailHTML(
               <tr style="background-color: #f3f4f6;">
                 <th style="padding: 16px; font-weight: 600; color: #374151; text-align: left;">Ubicación</th>
                 <th style="padding: 16px; font-weight: 600; color: #374151; text-align: right;">Precio Ref.</th>
-                <th style="padding: 16px; font-weight: 600; color: #374151; text-align: right;">Descuento Flete</th>
+                <th style="padding: 16px; font-weight: 600; color: #374151; text-align: right;">Ajuste</th>
                 <th style="padding: 16px; font-weight: 600; color: #374151; text-align: right;">Precio</th>
                 <th style="padding: 16px; font-weight: 600; color: #374151; text-align: right;">Distancia (km)</th>
                 <th style="padding: 16px; font-weight: 600; color: #374151; text-align: right;">Precio Flete</th>
