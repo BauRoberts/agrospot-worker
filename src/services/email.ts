@@ -498,7 +498,9 @@ export async function sendMatchNotification(quotation: any, matches: any[]) {
     const subjectPrefix =
       NODE_ENV !== "production" ? `[${NODE_ENV.toUpperCase()}] ` : "";
 
-    const msg = {
+    // Create two separate email objects - one for admin recipients and one for the quotation submitter
+    // Email for admin recipients
+    const adminEmailMsg = {
       to: recipientEmails,
       from: { email: SENDER_EMAIL, name: "Agrospot" },
       subject: `${subjectPrefix}Agrospot: Cotización de ${toNumber(
@@ -507,19 +509,46 @@ export async function sendMatchNotification(quotation: any, matches: any[]) {
       html: await generateEmailHTML(quotation, validMatches),
     };
 
+    // Email for the quotation submitter
+    // Only send to the quotation submitter if they provided an email address
+    const userEmailMsg = quotation.email
+      ? {
+          to: [{ email: quotation.email }],
+          from: { email: SENDER_EMAIL, name: "Agrospot" },
+          subject: `${subjectPrefix}Agrospot: Tu cotización de ${toNumber(
+            quotation.quantityTons
+          )}tn en ${quotation.location.city}`,
+          html: await generateEmailHTML(quotation, validMatches),
+        }
+      : null;
+
     console.log(
-      `Sending email notification in ${NODE_ENV} environment to: ${recipientEmails.join(
+      `Sending email notification in ${NODE_ENV} environment to admins: ${recipientEmails.join(
         ", "
       )}`
     );
+
+    if (userEmailMsg) {
+      console.log(
+        `Also sending email notification to quotation submitter: ${quotation.email}`
+      );
+    }
 
     if (!SENDGRID_API_KEY) {
       console.error("SENDGRID_API_KEY is not set, cannot send email");
       return false;
     }
 
-    await sgMail.send(msg);
-    console.log("Email sent successfully to all recipients");
+    // Send emails to admin recipients
+    await sgMail.send(adminEmailMsg);
+    console.log("Email sent successfully to admin recipients");
+
+    // Send email to quotation submitter if they provided an email
+    if (userEmailMsg) {
+      await sgMail.send(userEmailMsg);
+      console.log("Email sent successfully to quotation submitter");
+    }
+
     return true;
   } catch (error: any) {
     console.error(
