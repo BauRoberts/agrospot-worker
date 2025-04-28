@@ -3,8 +3,12 @@ import { PrismaClient } from "@prisma/client";
 // Initialize Prisma client
 const prisma = new PrismaClient();
 
+// Discount to apply to transport rates (15%)
+const TRANSPORT_RATE_DISCOUNT = 0.15;
+
 /**
  * Get transport rate per ton for a given distance
+ * Applies a 15% discount to rates from the transport rates table
  */
 export async function getTransportRate(distanceKm: number): Promise<number> {
   try {
@@ -20,6 +24,7 @@ export async function getTransportRate(distanceKm: number): Promise<number> {
     });
 
     if (priceRange) {
+      // Custom price ranges are returned without discount
       return Number(priceRange.ratePerTon);
     }
 
@@ -35,6 +40,7 @@ export async function getTransportRate(distanceKm: number): Promise<number> {
     });
 
     if (fallbackRange) {
+      // Custom price ranges are returned without discount
       return Number(fallbackRange.ratePerTon);
     }
 
@@ -51,7 +57,12 @@ export async function getTransportRate(distanceKm: number): Promise<number> {
     });
 
     if (transportRate) {
-      return Number(transportRate.ratePerTon);
+      // Apply 15% discount to the transport rate
+      const baseRate = Number(transportRate.ratePerTon);
+      const discountedRate = baseRate * (1 - TRANSPORT_RATE_DISCOUNT);
+      
+      // Round to 2 decimal places
+      return Math.round(discountedRate * 100) / 100;
     }
 
     // 4. Final fallback to closest rate or default value
@@ -62,11 +73,16 @@ export async function getTransportRate(distanceKm: number): Promise<number> {
     });
 
     if (defaultRate) {
-      return Number(defaultRate.ratePerTon);
+      // Apply 15% discount to the default rate
+      const baseRate = Number(defaultRate.ratePerTon);
+      const discountedRate = baseRate * (1 - TRANSPORT_RATE_DISCOUNT);
+      
+      // Round to 2 decimal places
+      return Math.round(discountedRate * 100) / 100;
     }
 
     // 5. Ultimate fallback
-    return distance * 10; // Very basic fallback rate
+    return distance * 10 * (1 - TRANSPORT_RATE_DISCOUNT); // Very basic fallback rate with discount
   } catch (error) {
     console.error("Error getting transport rate:", error);
     throw new Error(
