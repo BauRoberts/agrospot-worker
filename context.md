@@ -376,6 +376,4 @@ BACKGROUND_PROCESSING_KEY
 
 What are we doing now ?
 
-We are fixing the match processor. On the agrospot Worker file we are processing all the matches. We are triggering them from a cron job setup on cron-job.org!
-
-Yesterday we made some changes to make the currencies work better. With this changes i Started to receive a lot of email from one quotation today. That was because the confirmation email and the matches were being sent correctly, but they were sent every 5 minutes on a loop because the proccesing status wasnt being updated. So the cron job thought the matches werent made and the email was being sent again. So to fix im attaching a set of files.
+We are going to make some changes in the email with the matches we are sneding! We should add a new column that has the difference in %. The idea is to calculate the differnece in percentaje with rosario! 

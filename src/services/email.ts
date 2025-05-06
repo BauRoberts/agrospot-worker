@@ -178,6 +178,55 @@ function calculateRosarioDifference(
   return `${sign}${formatCurrency(Math.abs(difference))}`;
 }
 
+// New function to calculate percentage difference with Rosario
+function calculateRosarioDifferencePercentage(
+  match: any,
+  matches: any[],
+  quotation: any,
+  exchangeRate: number
+): string {
+  const rosarioMatch = matches.find((m) => m.opportunity.id === -1);
+  if (!rosarioMatch) return "-";
+
+  const paymentOption = match.opportunity.paymentOptions[0];
+  const rosarioPaymentOption = rosarioMatch.opportunity.paymentOptions[0];
+
+  // Get the exchange rate used for this match (if any)
+  const exchangeRateToUse = match.exchangeRateUsed || exchangeRate;
+
+  // Calculate the proper price based on currency
+  let pricePerTonInARS = toNumber(paymentOption.pricePerTon);
+  if (match.opportunity.currency === "USD") {
+    // If the opportunity is in USD, multiply by exchange rate to get ARS equivalent
+    pricePerTonInARS = pricePerTonInARS * exchangeRateToUse;
+  }
+
+  // Safely handle null quantityTons
+  const quotationQuantity = toNumber(quotation.quantityTons);
+  if (quotationQuantity === 0) return "-"; // Avoid division by zero
+
+  const matchFinalPrice =
+    pricePerTonInARS - match.transportationCost / quotationQuantity;
+
+  const rosarioFinalPrice =
+    toNumber(rosarioPaymentOption.pricePerTon) -
+    rosarioMatch.transportationCost / quotationQuantity;
+
+  // Avoid division by zero
+  if (rosarioFinalPrice === 0) return "-";
+
+  // Calculate percentage difference
+  const percentageDiff = ((matchFinalPrice - rosarioFinalPrice) / rosarioFinalPrice) * 100;
+
+  // Format to 2 decimal places
+  const formattedPercentage = percentageDiff.toFixed(2);
+
+  // Add a plus sign for positive differences
+  const sign = percentageDiff > 0 ? "+" : "";
+
+  return `${sign}${formattedPercentage}%`;
+}
+
 function generateTableRowHTML(
   match: any,
   isReferencePrice: boolean = false,
@@ -192,7 +241,7 @@ function generateTableRowHTML(
   const quotationQuantity = toNumber(quotation.quantityTons);
   if (quotationQuantity === 0) {
     // Handle the case where quantity is zero or null
-    return `<tr><td colspan="10">Invalid quotation quantity</td></tr>`;
+    return `<tr><td colspan="11">Invalid quotation quantity</td></tr>`;
   }
 
   const transportCostPerTon = match.transportationCost / quotationQuantity;
@@ -274,6 +323,19 @@ function generateTableRowHTML(
             : "color: #ef4444;"
         }">
         ${calculateRosarioDifference(match, matches, quotation, exchangeRate)}
+      </td>
+      <td style="padding: 12px; text-align: right; font-weight: bold; font-family: Roboto, 'Segoe UI', 'Helvetica Neue', sans-serif; 
+        ${
+          calculateRosarioDifferencePercentage(
+            match,
+            matches,
+            quotation,
+            exchangeRate
+          ).startsWith("+")
+            ? "color: #0d9488;"
+            : "color: #ef4444;"
+        }">
+        ${calculateRosarioDifferencePercentage(match, matches, quotation, exchangeRate)}
       </td>
     </tr>
   `;
@@ -422,6 +484,7 @@ async function generateEmailHTML(
                 <th style="padding: 16px; font-weight: 600; color: #374151; text-align: right;">Plazo de pago</th>
                 <th style="padding: 16px; font-weight: 600; color: #374151; text-align: right;">Precio final TN</th>
                 <th style="padding: 16px; font-weight: 600; color: #374151; text-align: right;">Dif. vs Rosario</th>
+                <th style="padding: 16px; font-weight: 600; color: #374151; text-align: right;">Dif. % vs Rosario</th>
               </tr>
             </thead>
             <tbody>
