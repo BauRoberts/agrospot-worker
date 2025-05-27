@@ -1,3 +1,4 @@
+//src/services/routing-service.ts
 import { PrismaClient } from "@prisma/client";
 
 // Initialize Prisma client
@@ -36,7 +37,10 @@ export class RoutingService {
 
   constructor() {
     this.mapboxToken = process.env.MAPBOX_ACCESS_TOKEN || "";
-    this.mapboxProfile = process.env.MAPBOX_PROFILE || "mapbox/driving";
+    this.mapboxProfile = process.env.MAPBOX_PROFILE || "mapbox/cycling";
+
+    // LOG TEMPORAL - AGREGAR ESTA LÍNEA
+    console.log(`🚗 Routing service using profile: ${this.mapboxProfile}`);
 
     if (!this.mapboxToken) {
       console.warn(
@@ -102,6 +106,11 @@ export class RoutingService {
     try {
       const originCoords = `${origin.longitude},${origin.latitude}`;
       const destCoords = `${destination.longitude},${destination.latitude}`;
+
+      // LOG TEMPORAL - AGREGAR ESTA LÍNEA
+      console.log(
+        `🗺️  Using Mapbox profile: ${this.mapboxProfile} for ${origin.city} -> ${destination.city}`
+      );
 
       const url = `https://api.mapbox.com/directions/v5/${this.mapboxProfile}/${originCoords};${destCoords}?alternatives=false&geometries=geojson&overview=full&steps=false&access_token=${this.mapboxToken}`;
 
