@@ -55,6 +55,7 @@ model Opportunity {
   createdAt               DateTime        @default(now()) @map("created_at")
   updatedAt               DateTime        @updatedAt @map("updated_at")
   userId                  String?
+  is_special_offer        Boolean         @default(false)
   matches                 Match[]
   location                Location        @relation(fields: [locationId], references: [id])
   product                 Product         @relation(fields: [productId], references: [id])
@@ -69,7 +70,6 @@ model Quotation {
   productId        Int      @map("product_id")
   quantityTons     Decimal  @map("quantity_tons") @db.Decimal(10, 2)
   status           String   @default("pending")
-  processingStatus String   @default("not_started") @map("processing_status")
   createdAt        DateTime @default(now()) @map("created_at")
   updatedAt        DateTime @updatedAt @map("updated_at")
   locationId       Int      @map("location_id")
@@ -77,6 +77,7 @@ model Quotation {
   cellphone        String   @map("cellphone")
   email            String   @map("email")
   userId           String?
+  processingStatus String   @default("not_started") @map("processing_status")
   matches          Match[]
   location         Location @relation(fields: [locationId], references: [id])
   product          Product  @relation(fields: [productId], references: [id])
@@ -97,8 +98,8 @@ model Match {
   transportationCost       Decimal       @default(0) @map("transportation_cost") @db.Decimal(10, 2)
   profitabilityVsReference Decimal       @default(0) @map("profitability_vs_reference") @db.Decimal(10, 2)
   pricePerTon              Decimal       @map("price_per_ton") @db.Decimal(15, 2)
-  transportCost            Decimal       @map("transport_cost") @db.Decimal(15, 2)
   totalAmount              Decimal       @map("total_amount") @db.Decimal(15, 2)
+  transportCost            Decimal       @map("transport_cost") @db.Decimal(15, 2)
   routeId                  Int?          @map("route_id")
   opportunity              Opportunity   @relation(fields: [opportunityId], references: [id], onDelete: Cascade)
   paymentOption            PaymentOption @relation(fields: [paymentOptionId], references: [id], onDelete: Cascade)
@@ -211,8 +212,8 @@ model User {
   email         String?       @unique
   emailVerified DateTime?
   image         String?
-  password      String?
   role          String        @default("user")
+  password      String?
   inviteCode    String?
   accounts      Account[]
   opportunities Opportunity[]

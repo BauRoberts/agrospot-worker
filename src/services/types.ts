@@ -1,5 +1,5 @@
 // agrospot-worker/src/services/types.ts
-// Fixed version with proper Decimal support
+// Updated version with special offers support
 import { Decimal } from "@prisma/client/runtime/library";
 
 // Define a helper type to handle Prisma's Decimal type
@@ -54,6 +54,7 @@ export interface Opportunity {
   currency: string;
   location: Location;
   paymentOptions: PaymentOption[];
+  isSpecialOffer?: boolean; // NEW: Added special offer support
   createdAt?: Date;
   updatedAt?: Date;
   expirationDate?: Date | null;
@@ -78,6 +79,7 @@ export interface Match {
   profitabilityVsReference: number;
   routeId?: number;
   exchangeRateUsed?: number | null;
+  isSpecialOffer?: boolean; // NEW: Track if this match is from a special offer
 }
 
 export interface Quotation {

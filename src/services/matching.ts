@@ -1,6 +1,6 @@
-// agrospot-worker/src/processors/matching-processor.ts
+// agrospot-worker/src/processors/match-processor.ts
+// Updated with special offers support
 import { PrismaClient } from "@prisma/client";
-// Import Decimal from the runtime library instead
 import { Decimal } from "@prisma/client/runtime/library";
 import { routingService, RoutingService } from "../services/routing-service";
 import { getTransportRate } from "../services/transport-service";
@@ -11,6 +11,7 @@ const prisma = new PrismaClient();
 
 const COMMISSION_RATE = 0.01;
 const BATCH_SIZE = 10;
+const SPECIAL_OFFER_SCORE_BONUS = 1000; // Bonus points for special offers
 
 type BaseLocation = {
   id: number;
@@ -62,6 +63,7 @@ type BaseOpportunity = {
   updatedAt: Date;
   expirationDate: Date | null;
   userId: string | null;
+  is_special_offer: boolean; // NEW: Added special offer field
 };
 
 const ROSARIO_LOCATION: BaseLocation = {
@@ -91,7 +93,8 @@ interface MatchResult {
   };
   profitabilityVsReference: number;
   routeId?: number;
-  exchangeRateUsed?: number | null; // Added to track the exchange rate used
+  exchangeRateUsed?: number | null;
+  isSpecialOffer?: boolean; // NEW: Track if this match is from a special offer
 }
 
 interface OpportunityWithRelations extends BaseOpportunity {
@@ -120,11 +123,14 @@ async function calculateMatchData(
 ): Promise<MatchResult | null> {
   try {
     console.log(
-      `Starting match calculation for opportunity ${opportunity.id} with quotation ${quotation.id}`
+      `Starting match calculation for opportunity ${
+        opportunity.id
+      } with quotation ${quotation.id}${
+        opportunity.is_special_offer ? " [SPECIAL OFFER]" : ""
+      }`
     );
 
     // Fetch the exchange rate at the beginning of calculation
-    // to ensure consistent currency handling throughout this match
     const exchangeRate = await getExchangeRate();
     console.log(`Using exchange rate for calculation: ${exchangeRate} ARS/USD`);
 
@@ -142,6 +148,7 @@ async function calculateMatchData(
       distance: routeResponse.distance,
       duration: routeResponse.duration,
       hasGeometry: !!routeResponse.geometry,
+      isSpecialOffer: opportunity.is_special_offer,
     });
 
     const distanceKm = RoutingService.metersToKm(routeResponse.distance);
@@ -188,7 +195,6 @@ async function calculateMatchData(
             `Converting price from USD to ARS for opportunity ${opportunity.id}`
           );
 
-          // Use the exchange rate we already fetched
           pricePerTon = Number(paymentOption.pricePerTon) * exchangeRate;
 
           console.log(
@@ -204,6 +210,7 @@ async function calculateMatchData(
           originalPrice: paymentOption.pricePerTon,
           convertedPrice: pricePerTon,
           currency: opportunity.currency,
+          isSpecialOffer: opportunity.is_special_offer,
         });
       } catch (error) {
         console.error(
@@ -217,31 +224,45 @@ async function calculateMatchData(
       const commission = pricePerTon * COMMISSION_RATE;
       const profitability = pricePerTon - transportCostPerTon - commission;
 
+      // NEW: Calculate score with special offer bonus
+      let score = profitability;
+      if (opportunity.is_special_offer) {
+        score = profitability + SPECIAL_OFFER_SCORE_BONUS;
+        console.log(
+          `🔥 Special offer detected! Adding ${SPECIAL_OFFER_SCORE_BONUS} bonus points to score`
+        );
+      }
+
       console.log("Match calculations completed:", {
         opportunityId: opportunity.id,
         commission,
         profitability,
+        score,
         transportationCost,
         pricePerTon,
         paymentOptionId: paymentOption.id,
         exchangeRate: opportunity.currency === "USD" ? exchangeRate : null,
+        isSpecialOffer: opportunity.is_special_offer,
       });
 
       const matchResult: MatchResult = {
         opportunity,
         route: routeResponse,
         distance: distanceKm,
-        score: profitability,
+        score, // NEW: Updated score with special offer bonus
         profitability,
         transportationCost,
         bestPaymentOptionId: paymentOption.id,
         commission: commission * Number(quotation.quantityTons),
         profitabilityVsReference: 0,
         exchangeRateUsed: opportunity.currency === "USD" ? exchangeRate : null,
+        isSpecialOffer: opportunity.is_special_offer, // NEW: Track special offer status
       };
 
       console.log(
-        `Successfully created match result for opportunity ${opportunity.id}`
+        `Successfully created match result for opportunity ${opportunity.id}${
+          opportunity.is_special_offer ? " [SPECIAL OFFER]" : ""
+        }`
       );
       return matchResult;
     }
@@ -305,6 +326,7 @@ async function createRosarioOpportunity(
     updatedAt: new Date(),
     expirationDate: null,
     userId: null,
+    is_special_offer: false, // Rosario reference is never a special offer
   };
 }
 
@@ -319,12 +341,17 @@ async function saveMatchesToDatabase(
     `Saving ${realMatches.length} matches to database (excluding Rosario reference)`
   );
 
+  // Count special offers for logging
+  const specialOfferCount = realMatches.filter(
+    (match) => match.isSpecialOffer
+  ).length;
+  console.log(
+    `🔥 ${specialOfferCount} special offers found out of ${realMatches.length} total matches`
+  );
+
   const matchPromises = realMatches.map(async (match) => {
-    // Store the exchange rate in a variable but don't use it in the Prisma query yet
-    // until the schema is updated
     const exchangeRate = match.exchangeRateUsed;
 
-    // Log the exchange rate for debugging
     if (exchangeRate) {
       console.log(
         `Exchange rate for match with opportunity ${match.opportunity.id}: ${exchangeRate}`
@@ -354,12 +381,10 @@ async function saveMatchesToDatabase(
         Number(match.opportunity.paymentOptions[0].pricePerTon || 0) *
           Number(match.opportunity.quantityTons || 0)
       ),
-      // Remove this line until the schema is updated
-      // exchangeRateUsed: match.exchangeRateUsed ? safeDecimal(match.exchangeRateUsed) : null,
     };
 
     try {
-      return await prisma.match.create({
+      const savedMatch = await prisma.match.create({
         data: matchData,
         include: {
           opportunity: {
@@ -378,6 +403,14 @@ async function saveMatchesToDatabase(
           },
         },
       });
+
+      if (match.isSpecialOffer) {
+        console.log(
+          `🔥 Saved special offer match for opportunity ${match.opportunity.id}`
+        );
+      }
+
+      return savedMatch;
     } catch (error) {
       console.error(
         `Failed to save match for opportunity ${match.opportunity.id}:`,
@@ -387,7 +420,6 @@ async function saveMatchesToDatabase(
     }
   });
 
-  // We still want to use Promise.all to save all matches concurrently
   return Promise.all(matchPromises);
 }
 
@@ -410,9 +442,22 @@ export async function createMatchesForQuotation(quotationId: number) {
         product: true,
         paymentOptions: true,
       },
+      // NEW: Order by special offers first
+      orderBy: [
+        { is_special_offer: "desc" }, // Special offers first
+        { createdAt: "desc" }, // Then by creation date
+      ],
     }),
     createRosarioOpportunity(quotation as QuotationWithRelations),
   ]);
+
+  // Log special offers found
+  const specialOfferOpportunities = opportunities.filter(
+    (opp) => opp.is_special_offer
+  );
+  console.log(
+    `🔥 Found ${specialOfferOpportunities.length} special offer opportunities out of ${opportunities.length} total opportunities`
+  );
 
   if (rosarioOpportunity) {
     opportunities.push(rosarioOpportunity);
@@ -451,6 +496,11 @@ export async function createMatchesForQuotation(quotationId: number) {
     }
   }
 
-  // Return all matches (including Rosario) for email notification
-  return matches;
+  // NEW: Sort matches by score (special offers will naturally be first due to bonus)
+  const sortedMatches = matches.sort((a, b) => b.score - a.score);
+
+  console.log(`🔥 Final match order: Special offers prioritized in results`);
+
+  // Return sorted matches for email notification
+  return sortedMatches;
 }

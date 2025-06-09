@@ -1,3 +1,5 @@
+//src/services/email.ts
+// Updated with special offers support
 import sgMail from "@sendgrid/mail";
 import { getExchangeRate } from "./currency-service";
 
@@ -216,7 +218,8 @@ function calculateRosarioDifferencePercentage(
   if (rosarioFinalPrice === 0) return "-";
 
   // Calculate percentage difference
-  const percentageDiff = ((matchFinalPrice - rosarioFinalPrice) / rosarioFinalPrice) * 100;
+  const percentageDiff =
+    ((matchFinalPrice - rosarioFinalPrice) / rosarioFinalPrice) * 100;
 
   // Format to 2 decimal places
   const formattedPercentage = percentageDiff.toFixed(2);
@@ -225,6 +228,13 @@ function calculateRosarioDifferencePercentage(
   const sign = percentageDiff > 0 ? "+" : "";
 
   return `${sign}${formattedPercentage}%`;
+}
+
+// NEW: Helper function to check if a match is a special offer
+function isSpecialOffer(match: any): boolean {
+  return (
+    match.opportunity.is_special_offer === true || match.isSpecialOffer === true
+  );
 }
 
 function generateTableRowHTML(
@@ -264,25 +274,40 @@ function generateTableRowHTML(
     exchangeRate
   );
 
-  // Determine background color based on match type
+  // NEW: Determine background color and styling based on match type
   let backgroundColor = "white";
   let textColor = "inherit";
+  let borderLeft = "";
+
+  const isSpecial = isSpecialOffer(match);
 
   if (isReferencePrice) {
     backgroundColor = "#94B0AB";
     textColor = "white";
+  } else if (isSpecial) {
+    // 🔥 SPECIAL OFFER STYLING
+    backgroundColor = "#fff8e1"; // Light golden background
+    borderLeft = "4px solid #f59e0b"; // Golden left border
+    textColor = "#92400e"; // Dark golden text
   } else if (paymentOption.isReferenceBased) {
     // Lighter background for reference-based prices
     backgroundColor = "#f0f7f6";
   }
 
-  // Create a custom tag for fixed or reference pricing
-  const pricingTypeTag = paymentOption.isReferenceBased
-    ? `<span style="font-size: 10px; background-color: #e0f2f1; color: #00796b; padding: 2px 4px; border-radius: 4px; margin-left: 4px;">Ref</span>`
-    : `<span style="font-size: 10px; background-color: #f0f4fa; color: #3b5998; padding: 2px 4px; border-radius: 4px; margin-left: 4px;">Fijo</span>`;
+  // Create a custom tag for fixed, reference, or special pricing
+  let pricingTypeTag = "";
+  if (isSpecial) {
+    pricingTypeTag = `<span style="font-size: 10px; background-color: #f59e0b; color: white; padding: 2px 6px; border-radius: 4px; margin-left: 4px; font-weight: bold;">🔥 ESPECIAL</span>`;
+  } else if (paymentOption.isReferenceBased) {
+    pricingTypeTag = `<span style="font-size: 10px; background-color: #e0f2f1; color: #00796b; padding: 2px 4px; border-radius: 4px; margin-left: 4px;">Ref</span>`;
+  } else {
+    pricingTypeTag = `<span style="font-size: 10px; background-color: #f0f4fa; color: #3b5998; padding: 2px 4px; border-radius: 4px; margin-left: 4px;">Fijo</span>`;
+  }
 
   return `
-    <tr style="background-color: ${backgroundColor}; color: ${textColor}; border-bottom: 1px solid #e5e7eb;">
+    <tr style="background-color: ${backgroundColor}; color: ${textColor}; border-bottom: 1px solid #e5e7eb; ${
+    borderLeft ? `border-left: ${borderLeft};` : ""
+  }">
       <td style="padding: 12px; text-align: left; font-family: Roboto, 'Segoe UI', 'Helvetica Neue', sans-serif;">
         ${opportunity.location.city} 
         ${isReferencePrice ? "" : pricingTypeTag}
@@ -335,7 +360,12 @@ function generateTableRowHTML(
             ? "color: #0d9488;"
             : "color: #ef4444;"
         }">
-        ${calculateRosarioDifferencePercentage(match, matches, quotation, exchangeRate)}
+        ${calculateRosarioDifferencePercentage(
+          match,
+          matches,
+          quotation,
+          exchangeRate
+        )}
       </td>
     </tr>
   `;
@@ -394,16 +424,29 @@ async function generateEmailHTML(
       console.log(
         `Difference vs Rosario for opportunity ${match.opportunity.id} (${
           match.opportunity.currency
-        }): ${formatCurrency(difference)}`
+        })${isSpecialOffer(match) ? " [SPECIAL OFFER]" : ""}: ${formatCurrency(
+          difference
+        )}`
       );
 
       return difference > 0;
     })
-    .sort((a, b) => b.profitability - a.profitability);
+    .sort((a, b) => {
+      // NEW: Sort with special offers first, then by profitability
+      const aIsSpecial = isSpecialOffer(a);
+      const bIsSpecial = isSpecialOffer(b);
 
-  // Log how many matches passed the filter
+      if (aIsSpecial && !bIsSpecial) return -1; // a (special) comes first
+      if (!aIsSpecial && bIsSpecial) return 1; // b (special) comes first
+
+      // If both are special or both are regular, sort by profitability
+      return b.profitability - a.profitability;
+    });
+
+  // Count special offers for logging
+  const specialOfferCount = sortedMatches.filter(isSpecialOffer).length;
   console.log(
-    `Filtered to ${sortedMatches.length} matches with positive difference vs Rosario`
+    `🔥 Email will show ${specialOfferCount} special offers out of ${sortedMatches.length} total matches`
   );
 
   // Map back to original matches for rendering
@@ -413,6 +456,9 @@ async function generateEmailHTML(
     )
     .filter((m) => m !== undefined) as any[];
 
+  // NEW: Check if we have special offers for email subject
+  const hasSpecialOffers = originalSortedMatches.some(isSpecialOffer);
+
   // Add environment banner for non-production environments
   const environmentBanner =
     NODE_ENV !== "production"
@@ -420,6 +466,14 @@ async function generateEmailHTML(
         <strong>⚠️ ${NODE_ENV.toUpperCase()} ENVIRONMENT ⚠️</strong> - This is a test email from the ${NODE_ENV} environment
       </div>`
       : "";
+
+  // NEW: Special offers banner
+  const specialOffersBanner = hasSpecialOffers
+    ? `<div style="background-color: #f59e0b; color: white; padding: 15px; text-align: center; margin-bottom: 20px; font-family: Roboto, 'Segoe UI', 'Helvetica Neue', sans-serif; border-radius: 8px;">
+        <strong>🔥 ¡OFERTAS ESPECIALES DISPONIBLES! 🔥</strong><br>
+        <span style="font-size: 14px;">Encontramos ofertas especiales para tu cotización - ¡No te las pierdas!</span>
+      </div>`
+    : "";
 
   // Safe handling for quantityTons that might be null
   const quotationTons = toNumber(quotation.quantityTons);
@@ -439,6 +493,7 @@ async function generateEmailHTML(
     <body style="margin: 0; padding: 40px 20px; background-color: #f9fafb; font-family: Roboto, 'Segoe UI', 'Helvetica Neue', sans-serif;">
       <div style="max-width: 900px; margin: 0 auto;">
         ${environmentBanner}
+        ${specialOffersBanner}
         
         <!-- Logo -->
         <div style="text-align: center; margin-bottom: 40px;">
@@ -459,6 +514,10 @@ async function generateEmailHTML(
 
         <!-- Price Legend -->
         <div style="margin-bottom: 20px; font-size: 12px; color: #4B5563;">
+          <div style="display: inline-block; margin-right: 15px;">
+            <span style="font-size: 10px; background-color: #f59e0b; color: white; padding: 2px 6px; border-radius: 4px; margin-right: 4px; font-weight: bold;">🔥 ESPECIAL</span>
+            <span>Oferta especial del día</span>
+          </div>
           <div style="display: inline-block; margin-right: 15px;">
             <span style="font-size: 10px; background-color: #e0f2f1; color: #00796b; padding: 2px 4px; border-radius: 4px; margin-right: 4px;">Ref</span>
             <span>Precio basado en referencia</span>
@@ -523,6 +582,7 @@ async function generateEmailHTML(
           <p>Notification Recipients: ${getRecipientEmails().join(", ")}</p>
           <p>Generated: ${new Date().toISOString()}</p>
           <p>Exchange Rate: ${exchangeRate}</p>
+          <p>Special Offers: ${specialOfferCount}</p>
         </div>`
             : ""
         }
@@ -557,6 +617,10 @@ export async function sendMatchNotification(quotation: any, matches: any[]) {
     // Get recipient emails based on environment
     const recipientEmails = getRecipientEmails();
 
+    // NEW: Check if we have special offers for email subject
+    const hasSpecialOffers = validMatches.some(isSpecialOffer);
+    const specialOfferPrefix = hasSpecialOffers ? "🔥 " : "";
+
     // Add environment indicator to subject for non-production environments
     const subjectPrefix =
       NODE_ENV !== "production" ? `[${NODE_ENV.toUpperCase()}] ` : "";
@@ -566,7 +630,7 @@ export async function sendMatchNotification(quotation: any, matches: any[]) {
     const adminEmailMsg = {
       to: recipientEmails,
       from: { email: SENDER_EMAIL, name: "Agrospot" },
-      subject: `${subjectPrefix}Agrospot: Cotización de ${toNumber(
+      subject: `${subjectPrefix}${specialOfferPrefix}Agrospot: Cotización de ${toNumber(
         quotation.quantityTons
       )}tn en ${quotation.location.city}`,
       html: await generateEmailHTML(quotation, validMatches),
@@ -578,7 +642,7 @@ export async function sendMatchNotification(quotation: any, matches: any[]) {
       ? {
           to: [{ email: quotation.email }],
           from: { email: SENDER_EMAIL, name: "Agrospot" },
-          subject: `${subjectPrefix}Agrospot: Tu cotización de ${toNumber(
+          subject: `${subjectPrefix}${specialOfferPrefix}Agrospot: Tu cotización de ${toNumber(
             quotation.quantityTons
           )}tn en ${quotation.location.city}`,
           html: await generateEmailHTML(quotation, validMatches),
@@ -588,12 +652,14 @@ export async function sendMatchNotification(quotation: any, matches: any[]) {
     console.log(
       `Sending email notification in ${NODE_ENV} environment to admins: ${recipientEmails.join(
         ", "
-      )}`
+      )}${hasSpecialOffers ? " [WITH SPECIAL OFFERS]" : ""}`
     );
 
     if (userEmailMsg) {
       console.log(
-        `Also sending email notification to quotation submitter: ${quotation.email}`
+        `Also sending email notification to quotation submitter: ${
+          quotation.email
+        }${hasSpecialOffers ? " [WITH SPECIAL OFFERS]" : ""}`
       );
     }
 
