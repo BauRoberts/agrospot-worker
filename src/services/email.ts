@@ -20,14 +20,14 @@ function getRecipientEmails(): string[] {
   if (NODE_ENV === "production") {
     return (
       process.env.PROD_RECIPIENT_EMAILS ||
-      "bautistaroberts@gmail.com,santiagogarciacastellanos@gmail.com"
+      "bautistaroberts@gmail.com,santiagogarciacastellanos@gmail.com,felipe@agrospot.com.ar"
     )
       .split(",")
       .filter(Boolean);
   } else if (process.env.USE_STAGING_EMAILS === "true") {
     return (
       process.env.STAGING_RECIPIENT_EMAILS ||
-      "bautistaroberts@gmail.com,santiagogarciacastellanos@gmail.com"
+      "bautistaroberts@gmail.com,santiagogarciacastellanos@gmail.com,felipe@agrospot.com.ar"
     )
       .split(",")
       .filter(Boolean);
