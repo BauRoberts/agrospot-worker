@@ -9,7 +9,7 @@ import { convertCurrency, getExchangeRate } from "../services/currency-service";
 // Use the global Prisma instance or create a new one if needed
 const prisma = new PrismaClient();
 
-const COMMISSION_RATE = 0.01;
+const COMMISSION_RATE = 0.02;
 const BATCH_SIZE = 10;
 const SPECIAL_OFFER_SCORE_BONUS = 1000; // Bonus points for special offers
 
