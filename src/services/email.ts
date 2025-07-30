@@ -1,19 +1,17 @@
 //src/services/email.ts
-// Updated with special offers support
-import sgMail from "@sendgrid/mail";
+// Updated with special offers support and Resend
+import { Resend } from "resend";
 import { getExchangeRate } from "./currency-service";
 
-const SENDGRID_API_KEY = process.env.SENDGRID_API_KEY;
+const RESEND_API_KEY = process.env.RESEND_API_KEY;
 const SENDER_EMAIL = "info@agrospot.com.ar";
 
 // Environment configuration
 const NODE_ENV = process.env.NODE_ENV || "development";
 const EMAIL_ENABLED = process.env.EMAIL_ENABLED !== "false";
 
-// Configure SendGrid client
-if (SENDGRID_API_KEY) {
-  sgMail.setApiKey(SENDGRID_API_KEY);
-}
+// Configure Resend client
+const resend = RESEND_API_KEY ? new Resend(RESEND_API_KEY) : null;
 
 // Get recipient emails based on environment
 function getRecipientEmails(): string[] {
@@ -306,8 +304,8 @@ function generateTableRowHTML(
 
   return `
     <tr style="background-color: ${backgroundColor}; color: ${textColor}; border-bottom: 1px solid #e5e7eb; ${
-    borderLeft ? `border-left: ${borderLeft};` : ""
-  }">
+      borderLeft ? `border-left: ${borderLeft};` : ""
+    }">
       <td style="padding: 12px; text-align: left; font-family: Roboto, 'Segoe UI', 'Helvetica Neue', sans-serif;">
         ${opportunity.location.city} 
         ${isReferencePrice ? "" : pricingTypeTag}
@@ -332,22 +330,6 @@ function generateTableRowHTML(
       </td>
       <td style="padding: 12px; text-align: right; font-family: Roboto, 'Segoe UI', 'Helvetica Neue', sans-serif;">
         ${paymentOption.paymentTermDays}
-      </td>
-      <td style="padding: 12px; text-align: right; font-weight: bold; font-family: Roboto, 'Segoe UI', 'Helvetica Neue', sans-serif;">
-        ${formatCurrency(finalPricePerTon)}
-      </td>
-      <td style="padding: 12px; text-align: right; font-weight: bold; font-family: Roboto, 'Segoe UI', 'Helvetica Neue', sans-serif; 
-        ${
-          calculateRosarioDifference(
-            match,
-            matches,
-            quotation,
-            exchangeRate
-          ).startsWith("+")
-            ? "color: #0d9488;"
-            : "color: #ef4444;"
-        }">
-        ${calculateRosarioDifference(match, matches, quotation, exchangeRate)}
       </td>
       <td style="padding: 12px; text-align: right; font-weight: bold; font-family: Roboto, 'Segoe UI', 'Helvetica Neue', sans-serif; 
         ${
@@ -600,6 +582,11 @@ export async function sendMatchNotification(quotation: any, matches: any[]) {
       return;
     }
 
+    if (!resend) {
+      console.error("Resend not initialized - missing RESEND_API_KEY");
+      return;
+    }
+
     if (!matches?.length) {
       console.log("No matches found, skipping email");
       return;
@@ -625,67 +612,65 @@ export async function sendMatchNotification(quotation: any, matches: any[]) {
     const subjectPrefix =
       NODE_ENV !== "production" ? `[${NODE_ENV.toUpperCase()}] ` : "";
 
-    // Create two separate email objects - one for admin recipients and one for the quotation submitter
-    // Email for admin recipients
-    const adminEmailMsg = {
-      to: recipientEmails,
-      from: { email: SENDER_EMAIL, name: "Agrospot" },
-      subject: `${subjectPrefix}${specialOfferPrefix}Agrospot: Cotización de ${toNumber(
-        quotation.quantityTons
-      )}tn en ${quotation.location.city}`,
-      html: await generateEmailHTML(quotation, validMatches),
-    };
-
-    // Email for the quotation submitter
-    // Only send to the quotation submitter if they provided an email address
-    const userEmailMsg = quotation.email
-      ? {
-          to: [{ email: quotation.email }],
-          from: { email: SENDER_EMAIL, name: "Agrospot" },
-          subject: `${subjectPrefix}${specialOfferPrefix}Agrospot: Tu cotización de ${toNumber(
-            quotation.quantityTons
-          )}tn en ${quotation.location.city}`,
-          html: await generateEmailHTML(quotation, validMatches),
-        }
-      : null;
-
     console.log(
       `Sending email notification in ${NODE_ENV} environment to admins: ${recipientEmails.join(
         ", "
       )}${hasSpecialOffers ? " [WITH SPECIAL OFFERS]" : ""}`
     );
 
-    if (userEmailMsg) {
+    const userEmail = quotation.email;
+    if (userEmail) {
       console.log(
-        `Also sending email notification to quotation submitter: ${
-          quotation.email
-        }${hasSpecialOffers ? " [WITH SPECIAL OFFERS]" : ""}`
+        `Also sending email notification to quotation submitter: ${userEmail}${
+          hasSpecialOffers ? " [WITH SPECIAL OFFERS]" : ""
+        }`
       );
     }
 
-    if (!SENDGRID_API_KEY) {
-      console.error("SENDGRID_API_KEY is not set, cannot send email");
-      return false;
-    }
+    const emailHTML = await generateEmailHTML(quotation, validMatches);
 
     // Send emails to admin recipients
-    await sgMail.send(adminEmailMsg);
-    console.log("Email sent successfully to admin recipients");
+    const { data: adminData, error: adminError } = await resend.emails.send({
+      from: `Agrospot <${SENDER_EMAIL}>`,
+      to: recipientEmails,
+      subject: `${subjectPrefix}${specialOfferPrefix}Agrospot: Cotización de ${toNumber(
+        quotation.quantityTons
+      )}tn en ${quotation.location.city}`,
+      html: emailHTML,
+    });
+
+    if (adminError) {
+      console.error("Failed to send email to admins:", adminError);
+      throw adminError;
+    }
+
+    console.log("Email sent successfully to admin recipients:", adminData);
 
     // Send email to quotation submitter if they provided an email
-    if (userEmailMsg) {
-      await sgMail.send(userEmailMsg);
-      console.log("Email sent successfully to quotation submitter");
+    if (userEmail) {
+      const { data: userData, error: userError } = await resend.emails.send({
+        from: `Agrospot <${SENDER_EMAIL}>`,
+        to: [userEmail],
+        subject: `${subjectPrefix}${specialOfferPrefix}Agrospot: Tu cotización de ${toNumber(
+          quotation.quantityTons
+        )}tn en ${quotation.location.city}`,
+        html: emailHTML,
+      });
+
+      if (userError) {
+        console.error("Failed to send email to user:", userError);
+        // Don't throw here, admin emails were successful
+      } else {
+        console.log(
+          "Email sent successfully to quotation submitter:",
+          userData
+        );
+      }
     }
 
     return true;
   } catch (error: any) {
-    console.error(
-      "Failed to send email:",
-      error.response?.body?.errors || error.message
-    );
+    console.error("Failed to send email:", error.message || error);
     throw error;
   }
 }
-
-export default sendMatchNotification;
