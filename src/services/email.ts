@@ -13,28 +13,40 @@ const EMAIL_ENABLED = process.env.EMAIL_ENABLED !== "false";
 // Configure Resend client
 const resend = RESEND_API_KEY ? new Resend(RESEND_API_KEY) : null;
 
-// Get recipient emails based on environment
+// Get recipient emails based on environment - FIXED VERSION
 function getRecipientEmails(): string[] {
+  let emailString = "";
+
   if (NODE_ENV === "production") {
-    return (
+    emailString =
       process.env.PROD_RECIPIENT_EMAILS ||
-      "bautistaroberts@gmail.com,santiagogarciacastellanos@gmail.com,felipe@agrospot.com.ar,santiago@agrospot.com.ar"
-    )
-      .split(",")
-      .filter(Boolean);
+      "bautistaroberts@gmail.com,santiagogarciacastellanos@gmail.com,felipe@agrospot.com.ar,santiago@agrospot.com.ar";
   } else if (process.env.USE_STAGING_EMAILS === "true") {
-    return (
+    emailString =
       process.env.STAGING_RECIPIENT_EMAILS ||
-      "bautistaroberts@gmail.com,santiagogarciacastellanos@gmail.com,felipe@agrospot.com.ar,santiago@agrospot.com.ar"
-    )
-      .split(",")
-      .filter(Boolean);
+      "bautistaroberts@gmail.com,santiagogarciacastellanos@gmail.com,felipe@agrospot.com.ar,santiago@agrospot.com.ar";
   } else {
-    // development, test, or any other environment
-    return (process.env.DEV_RECIPIENT_EMAILS || "bautistaroberts@gmail.com")
-      .split(",")
-      .filter(Boolean);
+    emailString =
+      process.env.DEV_RECIPIENT_EMAILS || "bautistaroberts@gmail.com";
   }
+
+  // ✅ FIXED: Clean and validate emails properly
+  const emails = emailString
+    .split(",")
+    .map((email) => email.trim()) // Remove whitespace
+    .filter((email) => email.length > 0) // Remove empty strings
+    .filter((email) => {
+      // Basic email validation
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      const isValid = emailRegex.test(email);
+      if (!isValid) {
+        console.error(`Invalid email format detected: "${email}"`);
+      }
+      return isValid;
+    });
+
+  console.log(`✅ Cleaned recipient emails: ${emails.join(", ")}`);
+  return emails;
 }
 
 // Format currency - always in ARS regardless of original currency
@@ -235,6 +247,7 @@ function isSpecialOffer(match: any): boolean {
   );
 }
 
+// FIXED: generateTableRowHTML with all columns
 function generateTableRowHTML(
   match: any,
   isReferencePrice: boolean = false,
@@ -248,7 +261,6 @@ function generateTableRowHTML(
   // Safely handle null quantityTons
   const quotationQuantity = toNumber(quotation.quantityTons);
   if (quotationQuantity === 0) {
-    // Handle the case where quantity is zero or null
     return `<tr><td colspan="11">Invalid quotation quantity</td></tr>`;
   }
 
@@ -272,7 +284,7 @@ function generateTableRowHTML(
     exchangeRate
   );
 
-  // NEW: Determine background color and styling based on match type
+  // Determine background color and styling
   let backgroundColor = "white";
   let textColor = "inherit";
   let borderLeft = "";
@@ -283,16 +295,14 @@ function generateTableRowHTML(
     backgroundColor = "#94B0AB";
     textColor = "white";
   } else if (isSpecial) {
-    // 🔥 SPECIAL OFFER STYLING
-    backgroundColor = "#fff8e1"; // Light golden background
-    borderLeft = "4px solid #f59e0b"; // Golden left border
-    textColor = "#92400e"; // Dark golden text
+    backgroundColor = "#fff8e1";
+    borderLeft = "4px solid #f59e0b";
+    textColor = "#92400e";
   } else if (paymentOption.isReferenceBased) {
-    // Lighter background for reference-based prices
     backgroundColor = "#f0f7f6";
   }
 
-  // Create a custom tag for fixed, reference, or special pricing
+  // Create pricing type tag
   let pricingTypeTag = "";
   if (isSpecial) {
     pricingTypeTag = `<span style="font-size: 10px; background-color: #f59e0b; color: white; padding: 2px 6px; border-radius: 4px; margin-left: 4px; font-weight: bold;">🔥 ESPECIAL</span>`;
@@ -330,6 +340,22 @@ function generateTableRowHTML(
       </td>
       <td style="padding: 12px; text-align: right; font-family: Roboto, 'Segoe UI', 'Helvetica Neue', sans-serif;">
         ${paymentOption.paymentTermDays}
+      </td>
+      <td style="padding: 12px; text-align: right; font-weight: bold; font-family: Roboto, 'Segoe UI', 'Helvetica Neue', sans-serif;">
+        ${formatCurrency(finalPricePerTon)}
+      </td>
+      <td style="padding: 12px; text-align: right; font-weight: bold; font-family: Roboto, 'Segoe UI', 'Helvetica Neue', sans-serif; 
+        ${
+          calculateRosarioDifference(
+            match,
+            matches,
+            quotation,
+            exchangeRate
+          ).startsWith("+")
+            ? "color: #0d9488;"
+            : "color: #ef4444;"
+        }">
+        ${calculateRosarioDifference(match, matches, quotation, exchangeRate)}
       </td>
       <td style="padding: 12px; text-align: right; font-weight: bold; font-family: Roboto, 'Segoe UI', 'Helvetica Neue', sans-serif; 
         ${
