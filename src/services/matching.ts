@@ -277,6 +277,31 @@ async function calculateMatchData(
   }
 }
 
+// Map product IDs to negative opportunity IDs for Rosario references
+// Based on what was actually created in the database:
+// Product 4 (Maíz) → -1, Product 5 (Soja) → -2, Product 7 (Sorgo) → -3, Product 6 (Trigo) → -4
+function getRosarioOpportunityId(productId: number): number {
+  const mapping: Record<number, number> = {
+    4: -1,  // Maíz
+    5: -2,  // Soja
+    7: -3,  // Sorgo (swapped with Trigo)
+    6: -4,  // Trigo (swapped with Sorgo)
+  };
+  return mapping[productId] || -1;
+}
+
+// Map product IDs to their Rosario PaymentOption IDs (created in database)
+// Product 4 (Maíz) → 35, Product 5 (Soja) → 36, Product 7 (Sorgo) → 37, Product 6 (Trigo) → 38
+function getRosarioPaymentOptionId(productId: number): number {
+  const mapping: Record<number, number> = {
+    4: 35,  // Maíz
+    5: 36,  // Soja
+    7: 37,  // Sorgo (ID 37 in payment_option table)
+    6: 38,  // Trigo (ID 38 in payment_option table)
+  };
+  return mapping[productId] || 35;
+}
+
 async function createRosarioOpportunity(
   quotation: QuotationWithRelations
 ): Promise<OpportunityWithRelations | null> {
@@ -287,8 +312,11 @@ async function createRosarioOpportunity(
 
   if (!referencePrice) return null;
 
+  const rosarioOpportunityId = getRosarioOpportunityId(quotation.productId);
+  const rosarioPaymentOptionId = getRosarioPaymentOptionId(quotation.productId);
+
   return {
-    id: -1,
+    id: rosarioOpportunityId,
     productId: quotation.productId,
     quantityTons: quotation.quantityTons,
     status: "active",
@@ -304,8 +332,8 @@ async function createRosarioOpportunity(
     product: quotation.product,
     paymentOptions: [
       {
-        id: -1,
-        opportunityId: -1,
+        id: rosarioPaymentOptionId,
+        opportunityId: rosarioOpportunityId,
         pricePerTon: referencePrice.pricePerTon,
         paymentTermDays: 3,
         createdAt: new Date(),
@@ -332,22 +360,19 @@ async function saveMatchesToDatabase(
   rosarioMatch: MatchResult | undefined,
   exchangeRate: number
 ) {
-  // Filter out Rosario reference match (id: -1) before saving
-  const realMatches = matches.filter((match) => match.opportunity.id > 0);
-
   console.log(
-    `Saving ${realMatches.length} matches to database (excluding Rosario reference)`
+    `Saving ${matches.length} matches to database (including Rosario reference)`
   );
 
   // Count special offers for logging
-  const specialOfferCount = realMatches.filter(
+  const specialOfferCount = matches.filter(
     (match) => match.isSpecialOffer
   ).length;
   console.log(
-    `🔥 ${specialOfferCount} special offers found out of ${realMatches.length} total matches`
+    `🔥 ${specialOfferCount} special offers found out of ${matches.length} total matches`
   );
 
-  const matchPromises = realMatches.map(async (match) => {
+  const matchPromises = matches.map(async (match) => {
     // OPTIMIZATION #3: Find the correct payment option by bestPaymentOptionId
     const selectedPaymentOption = match.opportunity.paymentOptions.find(
       (po) => po.id === match.bestPaymentOptionId
