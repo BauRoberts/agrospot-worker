@@ -103,7 +103,7 @@ function toNumber(value: any): number {
   }
 }
 
-function formatReferencePrice(match: any, matches: any[]): string {
+function formatReferencePrice(_match: any, matches: any[]): string {
   const rosarioMatch = matches.find((m) => isRosarioMatch(m));
   if (!rosarioMatch) return "-";
 
@@ -464,12 +464,22 @@ async function generateEmailHTML(
     `🔥 Email will show ${specialOfferCount} special offers out of ${sortedMatches.length} total matches`
   );
 
-  // Map back to original matches for rendering
+  // Map back to original matches for rendering with deduplication
+  const seenIds = new Set<number>();
   const originalSortedMatches = sortedMatches
     .map((sortedMatch) =>
       matches.find((m) => m.opportunity.id === sortedMatch.opportunity.id)
     )
-    .filter((m) => m !== undefined) as any[];
+    .filter((m) => {
+      if (!m) return false;
+      // Deduplicate: ensure each opportunity ID appears only once
+      if (seenIds.has(m.opportunity.id)) {
+        console.warn(`Duplicate match detected for opportunity ${m.opportunity.id}, skipping`);
+        return false;
+      }
+      seenIds.add(m.opportunity.id);
+      return true;
+    }) as any[];
 
   // NEW: Check if we have special offers for email subject
   const hasSpecialOffers = originalSortedMatches.some(isSpecialOffer);
