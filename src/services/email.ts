@@ -104,7 +104,7 @@ function toNumber(value: any): number {
 }
 
 function formatReferencePrice(match: any, matches: any[]): string {
-  const rosarioMatch = matches.find((m) => m.opportunity.id === -1);
+  const rosarioMatch = matches.find((m) => isRosarioMatch(m));
   if (!rosarioMatch) return "-";
 
   const referencePrice = toNumber(
@@ -154,7 +154,7 @@ function calculateRosarioDifference(
   quotation: any,
   exchangeRate: number
 ): string {
-  const rosarioMatch = matches.find((m) => m.opportunity.id === -1);
+  const rosarioMatch = matches.find((m) => isRosarioMatch(m));
   if (!rosarioMatch) return "-";
 
   const paymentOption = match.opportunity.paymentOptions[0];
@@ -197,7 +197,7 @@ function calculateRosarioDifferencePercentage(
   quotation: any,
   exchangeRate: number
 ): string {
-  const rosarioMatch = matches.find((m) => m.opportunity.id === -1);
+  const rosarioMatch = matches.find((m) => isRosarioMatch(m));
   if (!rosarioMatch) return "-";
 
   const paymentOption = match.opportunity.paymentOptions[0];
@@ -245,6 +245,12 @@ function isSpecialOffer(match: any): boolean {
   return (
     match.opportunity.is_special_offer === true || match.isSpecialOffer === true
   );
+}
+
+// Helper function to check if a match is the Rosario reference
+// Rosario references have negative IDs: -1 (Maíz), -2 (Soja), -3 (Sorgo), -4 (Trigo)
+function isRosarioMatch(match: any): boolean {
+  return match.opportunity.id < 0;
 }
 
 // FIXED: generateTableRowHTML with all columns
@@ -381,7 +387,8 @@ function generateTableRowHTML(
 
 async function generateEmailHTML(
   quotation: any,
-  matches: any[]
+  matches: any[],
+  frontendUrl: string
 ): Promise<string> {
   // Get the current exchange rate directly from the service
   const exchangeRate = await getExchangeRate();
@@ -400,10 +407,10 @@ async function generateEmailHTML(
 
   const sortedMatches = [...matchesWithConvertedValues]
     .filter((match) => {
-      if (match.opportunity.id === -1) return true; // Keep Rosario
+      if (isRosarioMatch(match)) return true; // Keep Rosario reference (any negative ID)
 
       // Calculate difference with Rosario entirely in ARS
-      const rosarioMatch = matches.find((m) => m.opportunity.id === -1);
+      const rosarioMatch = matches.find((m) => isRosarioMatch(m));
       if (!rosarioMatch) return false;
 
       const paymentOption = match.opportunity.paymentOptions[0];
@@ -559,7 +566,7 @@ async function generateEmailHTML(
                 .map((match) =>
                   generateTableRowHTML(
                     match,
-                    match.opportunity.id === -1,
+                    isRosarioMatch(match),
                     quotation,
                     originalSortedMatches,
                     exchangeRate
@@ -569,7 +576,27 @@ async function generateEmailHTML(
             </tbody>
           </table>
         </div>
-        
+
+        ${
+          quotation.token
+            ? `<!-- CTA Button -->
+        <div style="text-align: center; margin: 40px 0;">
+          <h2 style="font-size: 18px; color: #374151; margin: 0 0 16px 0; font-family: Roboto, 'Segoe UI', 'Helvetica Neue', sans-serif;">
+            ¿Te interesa alguna de estas ofertas?
+          </h2>
+          <a href="${frontendUrl}/matches/${quotation.token}"
+             style="display: inline-block; background-color: #0d9488; color: white; padding: 16px 40px;
+                    text-decoration: none; border-radius: 8px; font-weight: bold; font-size: 16px;
+                    font-family: Roboto, 'Segoe UI', 'Helvetica Neue', sans-serif; box-shadow: 0 4px 6px rgba(13, 148, 136, 0.3);">
+            Ver Ofertas Completas y Continuar
+          </a>
+          <p style="font-size: 12px; color: #6B7280; margin: 12px 0 0 0; font-family: Roboto, 'Segoe UI', 'Helvetica Neue', sans-serif;">
+            ⏰ Este link expira en 24 horas
+          </p>
+        </div>`
+            : ""
+        }
+
         <!-- Exchange Rate Footer -->
         <div style="text-align: right; margin-top: 20px; font-size: 12px; color: #6B7280;">
           <p>Tipo de cambio utilizado: ${formatCurrency(exchangeRate)}/USD</p>
@@ -627,6 +654,10 @@ export async function sendMatchNotification(quotation: any, matches: any[]) {
       return;
     }
 
+    // Get frontend URL from environment variable or default to localhost
+    const frontendUrl =
+      process.env.FRONTEND_URL || "http://localhost:3000";
+
     // Get recipient emails based on environment
     const recipientEmails = getRecipientEmails();
 
@@ -653,7 +684,7 @@ export async function sendMatchNotification(quotation: any, matches: any[]) {
       );
     }
 
-    const emailHTML = await generateEmailHTML(quotation, validMatches);
+    const emailHTML = await generateEmailHTML(quotation, validMatches, frontendUrl);
 
     // Send emails to admin recipients
     const { data: adminData, error: adminError } = await resend.emails.send({

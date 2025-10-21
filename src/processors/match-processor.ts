@@ -72,6 +72,7 @@ export async function processMatches(
           name: quotation.name,
           cellphone: quotation.cellphone,
           email: quotation.email,
+          token: quotation.token, // Include token for the CTA button link
         };
 
         // Send notification
