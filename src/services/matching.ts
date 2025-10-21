@@ -278,26 +278,26 @@ async function calculateMatchData(
 }
 
 // Map product IDs to negative opportunity IDs for Rosario references
-// Based on what was actually created in the database:
-// Product 4 (Maíz) → -1, Product 5 (Soja) → -2, Product 7 (Sorgo) → -3, Product 6 (Trigo) → -4
+// Now synchronized with production IDs:
+// Product 15 (Maíz) → -1, Product 14 (Soja) → -2, Product 17 (Sorgo) → -3, Product 16 (Trigo) → -4
 function getRosarioOpportunityId(productId: number): number {
   const mapping: Record<number, number> = {
-    4: -1,  // Maíz
-    5: -2,  // Soja
-    7: -3,  // Sorgo (swapped with Trigo)
-    6: -4,  // Trigo (swapped with Sorgo)
+    15: -1,  // Maíz
+    14: -2,  // Soja
+    17: -3,  // Sorgo
+    16: -4,  // Trigo
   };
   return mapping[productId] || -1;
 }
 
 // Map product IDs to their Rosario PaymentOption IDs (created in database)
-// Product 4 (Maíz) → 35, Product 5 (Soja) → 36, Product 7 (Sorgo) → 37, Product 6 (Trigo) → 38
+// Product 15 (Maíz) → 35, Product 14 (Soja) → 36, Product 17 (Sorgo) → 37, Product 16 (Trigo) → 38
 function getRosarioPaymentOptionId(productId: number): number {
   const mapping: Record<number, number> = {
-    4: 35,  // Maíz
-    5: 36,  // Soja
-    7: 37,  // Sorgo (ID 37 in payment_option table)
-    6: 38,  // Trigo (ID 38 in payment_option table)
+    15: 35,  // Maíz
+    14: 36,  // Soja
+    17: 37,  // Sorgo
+    16: 38,  // Trigo
   };
   return mapping[productId] || 35;
 }
