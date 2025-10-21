@@ -4,7 +4,7 @@ import { PrismaClient } from "@prisma/client";
 import { Decimal } from "@prisma/client/runtime/library";
 import { routingService, RoutingService } from "../services/routing-service";
 import { getTransportRate } from "../services/transport-service";
-import { convertCurrency, getExchangeRate } from "../services/currency-service";
+import { getExchangeRate } from "../services/currency-service";
 
 // Use the global Prisma instance or create a new one if needed
 const prisma = new PrismaClient();
@@ -63,7 +63,7 @@ type BaseOpportunity = {
   updatedAt: Date;
   expirationDate: Date | null;
   userId: string | null;
-  is_special_offer: boolean; // NEW: Added special offer field
+  isSpecialOffer: boolean; // NEW: Added special offer field (camelCase for Prisma)
 };
 
 const ROSARIO_LOCATION: BaseLocation = {
@@ -119,19 +119,18 @@ function safeDecimal(value: number, precision: number = 2): Decimal {
 
 async function calculateMatchData(
   opportunity: OpportunityWithRelations,
-  quotation: QuotationWithRelations
+  quotation: QuotationWithRelations,
+  exchangeRate: number // NEW: Pass exchange rate as parameter instead of fetching it
 ): Promise<MatchResult | null> {
   try {
     console.log(
       `Starting match calculation for opportunity ${
         opportunity.id
       } with quotation ${quotation.id}${
-        opportunity.is_special_offer ? " [SPECIAL OFFER]" : ""
+        opportunity.isSpecialOffer ? " [SPECIAL OFFER]" : ""
       }`
     );
 
-    // Fetch the exchange rate at the beginning of calculation
-    const exchangeRate = await getExchangeRate();
     console.log(`Using exchange rate for calculation: ${exchangeRate} ARS/USD`);
 
     // Get route information
@@ -148,7 +147,7 @@ async function calculateMatchData(
       distance: routeResponse.distance,
       duration: routeResponse.duration,
       hasGeometry: !!routeResponse.geometry,
-      isSpecialOffer: opportunity.is_special_offer,
+      isSpecialOffer: opportunity.isSpecialOffer,
     });
 
     const distanceKm = RoutingService.metersToKm(routeResponse.distance);
@@ -210,7 +209,7 @@ async function calculateMatchData(
           originalPrice: paymentOption.pricePerTon,
           convertedPrice: pricePerTon,
           currency: opportunity.currency,
-          isSpecialOffer: opportunity.is_special_offer,
+          isSpecialOffer: opportunity.isSpecialOffer,
         });
       } catch (error) {
         console.error(
@@ -226,7 +225,7 @@ async function calculateMatchData(
 
       // NEW: Calculate score with special offer bonus
       let score = profitability;
-      if (opportunity.is_special_offer) {
+      if (opportunity.isSpecialOffer) {
         score = profitability + SPECIAL_OFFER_SCORE_BONUS;
         console.log(
           `🔥 Special offer detected! Adding ${SPECIAL_OFFER_SCORE_BONUS} bonus points to score`
@@ -242,7 +241,7 @@ async function calculateMatchData(
         pricePerTon,
         paymentOptionId: paymentOption.id,
         exchangeRate: opportunity.currency === "USD" ? exchangeRate : null,
-        isSpecialOffer: opportunity.is_special_offer,
+        isSpecialOffer: opportunity.isSpecialOffer,
       });
 
       const matchResult: MatchResult = {
@@ -256,12 +255,12 @@ async function calculateMatchData(
         commission: commission * Number(quotation.quantityTons),
         profitabilityVsReference: 0,
         exchangeRateUsed: opportunity.currency === "USD" ? exchangeRate : null,
-        isSpecialOffer: opportunity.is_special_offer, // NEW: Track special offer status
+        isSpecialOffer: opportunity.isSpecialOffer, // NEW: Track special offer status
       };
 
       console.log(
         `Successfully created match result for opportunity ${opportunity.id}${
-          opportunity.is_special_offer ? " [SPECIAL OFFER]" : ""
+          opportunity.isSpecialOffer ? " [SPECIAL OFFER]" : ""
         }`
       );
       return matchResult;
@@ -326,7 +325,7 @@ async function createRosarioOpportunity(
     updatedAt: new Date(),
     expirationDate: null,
     userId: null,
-    is_special_offer: false, // Rosario reference is never a special offer
+    isSpecialOffer: false, // Rosario reference is never a special offer
   };
 }
 
@@ -444,7 +443,7 @@ export async function createMatchesForQuotation(quotationId: number) {
       },
       // NEW: Order by special offers first
       orderBy: [
-        { is_special_offer: "desc" }, // Special offers first
+        { isSpecialOffer: "desc" }, // Special offers first
         { createdAt: "desc" }, // Then by creation date
       ],
     }),
@@ -453,7 +452,7 @@ export async function createMatchesForQuotation(quotationId: number) {
 
   // Log special offers found
   const specialOfferOpportunities = opportunities.filter(
-    (opp) => opp.is_special_offer
+    (opp) => opp.isSpecialOffer
   );
   console.log(
     `🔥 Found ${specialOfferOpportunities.length} special offer opportunities out of ${opportunities.length} total opportunities`
@@ -463,6 +462,10 @@ export async function createMatchesForQuotation(quotationId: number) {
     opportunities.push(rosarioOpportunity);
   }
 
+  // OPTIMIZATION: Fetch exchange rate ONCE for all opportunities instead of per opportunity
+  const exchangeRate = await getExchangeRate();
+  console.log(`🚀 Using single exchange rate for all matches: ${exchangeRate} ARS/USD`);
+
   const matches: MatchResult[] = [];
 
   for (let i = 0; i < opportunities.length; i += BATCH_SIZE) {
@@ -471,7 +474,8 @@ export async function createMatchesForQuotation(quotationId: number) {
       batch.map((opportunity: any) =>
         calculateMatchData(
           opportunity as OpportunityWithRelations,
-          quotation as QuotationWithRelations
+          quotation as QuotationWithRelations,
+          exchangeRate // NEW: Pass exchange rate as parameter
         )
       )
     );

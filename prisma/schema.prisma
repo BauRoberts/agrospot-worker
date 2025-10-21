@@ -55,12 +55,15 @@ model Opportunity {
   createdAt               DateTime        @default(now()) @map("created_at")
   updatedAt               DateTime        @updatedAt @map("updated_at")
   userId                  String?
-  is_special_offer        Boolean         @default(false)
+  isSpecialOffer          Boolean         @default(false) @map("is_special_offer")
+  companyId               Int?            @map("company_id")
   matches                 Match[]
+  company                 Company?        @relation(fields: [companyId], references: [id])
   location                Location        @relation(fields: [locationId], references: [id])
   product                 Product         @relation(fields: [productId], references: [id])
   user                    User?           @relation(fields: [userId], references: [id])
   paymentOptions          PaymentOption[]
+  inviteCodes             InviteCode[]
 
   @@map("opportunities")
 }
@@ -78,6 +81,8 @@ model Quotation {
   email            String   @map("email")
   userId           String?
   processingStatus String   @default("not_started") @map("processing_status")
+  token            String?  @unique
+  tokenExpiresAt   DateTime? @map("token_expires_at")
   matches          Match[]
   location         Location @relation(fields: [locationId], references: [id])
   product          Product  @relation(fields: [productId], references: [id])
@@ -90,13 +95,13 @@ model Match {
   id                       Int           @id @default(autoincrement())
   quotationId              Int           @map("quotation_id")
   opportunityId            Int           @map("opportunity_id")
-  matchScore               Decimal       @map("match_score") @db.Decimal(10, 2)
+  matchScore               Decimal       @map("match_score") @db.Decimal(15, 2)
   createdAt                DateTime      @default(now()) @map("created_at")
   paymentOptionId          Int           @map("payment_option_id")
-  commission               Decimal       @default(0) @map("commission") @db.Decimal(10, 2)
-  profitability            Decimal       @default(0) @map("profitability") @db.Decimal(10, 2)
-  transportationCost       Decimal       @default(0) @map("transportation_cost") @db.Decimal(10, 2)
-  profitabilityVsReference Decimal       @default(0) @map("profitability_vs_reference") @db.Decimal(10, 2)
+  commission               Decimal       @default(0) @map("commission") @db.Decimal(15, 2)
+  profitability            Decimal       @default(0) @map("profitability") @db.Decimal(15, 2)
+  transportationCost       Decimal       @default(0) @map("transportation_cost") @db.Decimal(15, 2)
+  profitabilityVsReference Decimal       @default(0) @map("profitability_vs_reference") @db.Decimal(15, 2)
   pricePerTon              Decimal       @map("price_per_ton") @db.Decimal(15, 2)
   totalAmount              Decimal       @map("total_amount") @db.Decimal(15, 2)
   transportCost            Decimal       @map("transport_cost") @db.Decimal(15, 2)
@@ -215,10 +220,12 @@ model User {
   role          String        @default("user")
   password      String?
   inviteCode    String?
+  companyId     Int?          @map("company_id")
   accounts      Account[]
   opportunities Opportunity[]
   quotations    Quotation[]
   sessions      Session[]
+  company       Company?      @relation(fields: [companyId], references: [id])
 
   @@map("users")
 }
@@ -233,14 +240,16 @@ model VerificationToken {
 }
 
 model InviteCode {
-  id        String   @id @default(cuid())
-  code      String   @unique
-  email     String?
-  used      Boolean  @default(false)
-  usedBy    String?
-  expiresAt DateTime
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
+  id            String       @id @default(cuid())
+  code          String       @unique
+  email         String?
+  used          Boolean      @default(false)
+  usedBy        String?
+  expiresAt     DateTime
+  opportunityId Int?         @map("opportunity_id")
+  createdAt     DateTime     @default(now()) @map("created_at")
+  updatedAt     DateTime     @updatedAt @map("updated_at")
+  opportunity   Opportunity? @relation(fields: [opportunityId], references: [id], onDelete: SetNull)
 
   @@map("invite_codes")
 }
@@ -266,4 +275,21 @@ model TransportPriceRange {
   updatedAt   DateTime @default(now()) @updatedAt @map("updated_at")
 
   @@map("transport_price_ranges")
+}
+
+model Company {
+  id            Int           @id @default(autoincrement())
+  name          String
+  email         String?
+  phone         String?
+  address       String?
+  logoUrl       String?       @map("logo_url")
+  createdAt     DateTime      @default(now()) @map("created_at")
+  updatedAt     DateTime      @updatedAt @map("updated_at")
+  description   String?
+  website       String?       @db.VarChar(255)
+  opportunities Opportunity[]
+  users         User[]
+
+  @@map("companies")
 }
