@@ -1,13 +1,10 @@
 // agrospot-worker/src/processors/match-processor.ts
 // Updated with special offers support
-import { PrismaClient } from "@prisma/client";
 import { Decimal } from "@prisma/client/runtime/library";
 import { routingService, RoutingService } from "../services/routing-service";
 import { getTransportRate } from "../services/transport-service";
 import { getExchangeRate } from "../services/currency-service";
-
-// Use the global Prisma instance or create a new one if needed
-const prisma = new PrismaClient();
+import { prisma } from "../lib/prisma";
 
 const COMMISSION_RATE = 0.01;
 const BATCH_SIZE = 10;
@@ -46,26 +43,6 @@ type BasePaymentOption = {
   referenceDiffCurrency: string;
 };
 
-type BaseOpportunity = {
-  id: number;
-  productId: number;
-  quantityTons: Decimal | null;
-  status: string;
-  locationId: number;
-  name: string;
-  cellphone: string;
-  email: string;
-  quality: string | null;
-  transportationCostPerKm: Decimal;
-  marketType: string;
-  currency: string;
-  createdAt: Date;
-  updatedAt: Date;
-  expirationDate: Date | null;
-  userId: string | null;
-  isSpecialOffer: boolean; // NEW: Added special offer field (camelCase for Prisma)
-};
-
 const ROSARIO_LOCATION: BaseLocation = {
   id: -1,
   city: "Rosario",
@@ -97,7 +74,25 @@ interface MatchResult {
   isSpecialOffer?: boolean; // NEW: Track if this match is from a special offer
 }
 
-interface OpportunityWithRelations extends BaseOpportunity {
+interface OpportunityWithRelations {
+  id: number;
+  productId: number;
+  quantityTons: Decimal | null;
+  status: string;
+  locationId: number;
+  name: string;
+  cellphone: string;
+  email: string;
+  quality: string | null;
+  transportationCostPerKm: Decimal;
+  marketType: string;
+  currency: string;
+  createdAt: Date;
+  updatedAt: Date;
+  expirationDate: Date | null;
+  userId: string | null;
+  isSpecialOffer: boolean;
+  companyId: number | null;
   location: BaseLocation;
   product: BaseProduct;
   paymentOptions: BasePaymentOption[];
@@ -326,6 +321,7 @@ async function createRosarioOpportunity(
     expirationDate: null,
     userId: null,
     isSpecialOffer: false, // Rosario reference is never a special offer
+    companyId: null,
   };
 }
 
@@ -357,6 +353,23 @@ async function saveMatchesToDatabase(
       );
     }
 
+    // OPTIMIZATION #3: Find the correct payment option by bestPaymentOptionId
+    const selectedPaymentOption = match.opportunity.paymentOptions.find(
+      (po) => po.id === match.bestPaymentOptionId
+    );
+
+    if (!selectedPaymentOption) {
+      console.error(
+        `Payment option ${match.bestPaymentOptionId} not found for opportunity ${match.opportunity.id}`
+      );
+      throw new Error(
+        `Payment option ${match.bestPaymentOptionId} not found`
+      );
+    }
+
+    const pricePerTon = Number(selectedPaymentOption.pricePerTon || 0);
+    const totalAmount = pricePerTon * Number(match.opportunity.quantityTons || 0);
+
     const matchData = {
       quotation: {
         connect: { id: quotationId },
@@ -372,35 +385,17 @@ async function saveMatchesToDatabase(
       profitability: safeDecimal(match.profitability),
       transportationCost: safeDecimal(match.transportationCost),
       profitabilityVsReference: safeDecimal(match.profitabilityVsReference),
-      pricePerTon: safeDecimal(
-        Number(match.opportunity.paymentOptions[0].pricePerTon || 0)
-      ),
+      pricePerTon: safeDecimal(pricePerTon),
       transportCost: safeDecimal(match.transportationCost),
-      totalAmount: safeDecimal(
-        Number(match.opportunity.paymentOptions[0].pricePerTon || 0) *
-          Number(match.opportunity.quantityTons || 0)
-      ),
+      totalAmount: safeDecimal(totalAmount),
     };
 
     try {
+      // OPTIMIZATION #4: Only select id instead of including all relations
+      // We don't use the returned data, so no need to fetch ~10KB per match
       const savedMatch = await prisma.match.create({
         data: matchData,
-        include: {
-          opportunity: {
-            include: {
-              location: true,
-              product: true,
-              paymentOptions: true,
-            },
-          },
-          paymentOption: true,
-          quotation: {
-            include: {
-              location: true,
-              product: true,
-            },
-          },
-        },
+        select: { id: true },
       });
 
       if (match.isSpecialOffer) {

@@ -1,8 +1,5 @@
 //src/services/transport-service.ts
-import { PrismaClient } from "@prisma/client";
-
-// Initialize Prisma client
-const prisma = new PrismaClient();
+import { prisma } from "../lib/prisma";
 
 // Discount to apply to transport rates (15%)
 const TRANSPORT_RATE_DISCOUNT = 0.15;

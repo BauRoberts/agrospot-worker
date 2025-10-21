@@ -1,7 +1,5 @@
 // agrospot-worker/src/services/currency-service.ts
-import { PrismaClient } from "@prisma/client";
-
-const prisma = new PrismaClient();
+import { prisma } from "../lib/prisma";
 
 // Cache management
 interface CacheItem {

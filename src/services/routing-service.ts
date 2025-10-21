@@ -1,8 +1,5 @@
 //src/services/routing-service.ts
-import { PrismaClient } from "@prisma/client";
-
-// Initialize Prisma client
-const prisma = new PrismaClient();
+import { prisma } from "../lib/prisma";
 
 interface Location {
   id: number;
