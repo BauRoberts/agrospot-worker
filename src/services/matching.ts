@@ -327,7 +327,10 @@ async function createRosarioOpportunity(
 
 async function saveMatchesToDatabase(
   quotationId: number,
-  matches: MatchResult[]
+  matches: MatchResult[],
+  quotation: QuotationWithRelations,
+  rosarioMatch: MatchResult | undefined,
+  exchangeRate: number
 ) {
   // Filter out Rosario reference match (id: -1) before saving
   const realMatches = matches.filter((match) => match.opportunity.id > 0);
@@ -345,14 +348,6 @@ async function saveMatchesToDatabase(
   );
 
   const matchPromises = realMatches.map(async (match) => {
-    const exchangeRate = match.exchangeRateUsed;
-
-    if (exchangeRate) {
-      console.log(
-        `Exchange rate for match with opportunity ${match.opportunity.id}: ${exchangeRate}`
-      );
-    }
-
     // OPTIMIZATION #3: Find the correct payment option by bestPaymentOptionId
     const selectedPaymentOption = match.opportunity.paymentOptions.find(
       (po) => po.id === match.bestPaymentOptionId
@@ -369,6 +364,60 @@ async function saveMatchesToDatabase(
 
     const pricePerTon = Number(selectedPaymentOption.pricePerTon || 0);
     const totalAmount = pricePerTon * Number(match.opportunity.quantityTons || 0);
+
+    // Calculate Rosario comparison values
+    let rosarioPricePerTon: number | null = null;
+    let rosarioDifference: number | null = null;
+    let rosarioDifferencePercent: number | null = null;
+
+    if (rosarioMatch) {
+      const rosarioPaymentOption = rosarioMatch.opportunity.paymentOptions[0];
+      rosarioPricePerTon = Number(rosarioPaymentOption.pricePerTon || 0);
+
+      const quotationQuantity = Number(quotation.quantityTons);
+      if (quotationQuantity > 0) {
+        // Get the exchange rate used for this match
+        const exchangeRateToUse = match.exchangeRateUsed || exchangeRate;
+
+        // Calculate price in ARS
+        let pricePerTonInARS = pricePerTon;
+        if (match.opportunity.currency === "USD") {
+          pricePerTonInARS = pricePerTon * exchangeRateToUse;
+        }
+
+        const matchFinalPrice =
+          pricePerTonInARS - match.transportationCost / quotationQuantity;
+
+        const rosarioFinalPrice =
+          rosarioPricePerTon - rosarioMatch.transportationCost / quotationQuantity;
+
+        rosarioDifference = matchFinalPrice - rosarioFinalPrice;
+
+        // Calculate percentage difference
+        if (rosarioFinalPrice !== 0) {
+          rosarioDifferencePercent =
+            ((matchFinalPrice - rosarioFinalPrice) / rosarioFinalPrice) * 100;
+        }
+      }
+    }
+
+    // Format reference diff display
+    let referenceDiffDisplay: string | null = null;
+    if (selectedPaymentOption.isReferenceBased) {
+      const adjustmentValue = Number(selectedPaymentOption.referenceDiff || 0);
+      const sign = adjustmentValue >= 0 ? "+" : "";
+
+      if (selectedPaymentOption.referenceDiffType === "percentage") {
+        referenceDiffDisplay = `${sign}${adjustmentValue}%`;
+      } else {
+        const currency = selectedPaymentOption.referenceDiffCurrency || match.opportunity.currency;
+        if (currency === "USD") {
+          referenceDiffDisplay = `${sign}USD ${Math.abs(adjustmentValue)}`;
+        } else {
+          referenceDiffDisplay = `${sign}${Math.abs(adjustmentValue)} ARS`;
+        }
+      }
+    }
 
     const matchData = {
       quotation: {
@@ -388,6 +437,27 @@ async function saveMatchesToDatabase(
       pricePerTon: safeDecimal(pricePerTon),
       transportCost: safeDecimal(match.transportationCost),
       totalAmount: safeDecimal(totalAmount),
+      // NEW: Complete data for email rendering
+      exchangeRateUsed: match.exchangeRateUsed
+        ? safeDecimal(match.exchangeRateUsed, 4)
+        : null,
+      distanceKm: Math.round(match.distance),
+      isSpecialOffer: match.isSpecialOffer || false,
+      rosarioPricePerTon: rosarioPricePerTon
+        ? safeDecimal(rosarioPricePerTon)
+        : null,
+      rosarioDifference: rosarioDifference
+        ? safeDecimal(rosarioDifference)
+        : null,
+      rosarioDifferencePercent: rosarioDifferencePercent
+        ? safeDecimal(rosarioDifferencePercent, 2)
+        : null,
+      transportRateApplied: match.transportationCost
+        ? safeDecimal(match.transportationCost / Number(quotation.quantityTons))
+        : null,
+      paymentTermDays: selectedPaymentOption.paymentTermDays,
+      isReferenceBased: selectedPaymentOption.isReferenceBased,
+      referenceDiffDisplay: referenceDiffDisplay,
     };
 
     try {
@@ -483,7 +553,16 @@ export async function createMatchesForQuotation(quotationId: number) {
   // Save only real matches to database
   if (matches.length > 0) {
     try {
-      const savedMatches = await saveMatchesToDatabase(quotationId, matches);
+      // Find Rosario match for comparison calculations
+      const rosarioMatch = matches.find((m) => m.opportunity.id === -1);
+
+      const savedMatches = await saveMatchesToDatabase(
+        quotationId,
+        matches,
+        quotation as QuotationWithRelations,
+        rosarioMatch,
+        exchangeRate
+      );
       console.log(
         `Successfully saved ${savedMatches.length} matches for quotation ${quotationId}`
       );
