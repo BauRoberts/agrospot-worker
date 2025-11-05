@@ -345,7 +345,7 @@ function generateTableRowHTML(
         ${formatCurrency(commissionPerTon)}
       </td>
       <td style="padding: 12px; text-align: right; font-family: Roboto, 'Segoe UI', 'Helvetica Neue', sans-serif;">
-        ${paymentOption.paymentTermDays}
+        ${isReferencePrice ? "-" : paymentOption.paymentTermDays}
       </td>
       <td style="padding: 12px; text-align: right; font-weight: bold; font-family: Roboto, 'Segoe UI', 'Helvetica Neue', sans-serif;">
         ${formatCurrency(finalPricePerTon)}
