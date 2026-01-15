@@ -8,7 +8,8 @@ import { Logger } from "winston";
 export async function processMatches(
   quotationId: number,
   prisma: PrismaClient,
-  logger: Logger
+  logger: Logger,
+  sendEmail: boolean = true // Default true for backward compatibility
 ): Promise<void> {
   try {
     logger.info(`Starting match processing for quotation ${quotationId}`);
@@ -50,41 +51,48 @@ export async function processMatches(
     // We pass prisma to our function to ensure it uses the worker's Prisma instance
     const matches = await createMatchesForQuotation(quotationId);
 
-    // 5. If matches were found, send notification
+    // 5. If matches were found, optionally send notification
     if (matches && matches.length > 0) {
       logger.info(
         `Found ${matches.length} matches for quotation ${quotationId}`
       );
 
-      try {
-        // Import email service with correct path
-        const { sendMatchNotification } = await import("../services/email");
+      // Only send email if sendEmail flag is true
+      if (sendEmail) {
+        try {
+          // Import email service with correct path
+          const { sendMatchNotification } = await import("../services/email");
 
-        // Format quotation for email
-        const emailQuotation = {
-          id: quotation.id,
-          product: quotation.product,
-          location: {
-            ...quotation.location,
-            state: quotation.location.state || "",
-          },
-          quantityTons: Number(quotation.quantityTons),
-          name: quotation.name,
-          cellphone: quotation.cellphone,
-          email: quotation.email,
-          token: quotation.token, // Include token for the CTA button link
-        };
+          // Format quotation for email
+          const emailQuotation = {
+            id: quotation.id,
+            product: quotation.product,
+            location: {
+              ...quotation.location,
+              state: quotation.location.state || "",
+            },
+            quantityTons: Number(quotation.quantityTons),
+            name: quotation.name,
+            cellphone: quotation.cellphone,
+            email: quotation.email,
+            token: quotation.token, // Include token for the CTA button link
+          };
 
-        // Send notification
-        await sendMatchNotification(emailQuotation, matches);
+          // Send notification
+          await sendMatchNotification(emailQuotation, matches);
+          logger.info(
+            `Successfully sent match notification email for quotation ${quotationId}`
+          );
+        } catch (emailError) {
+          // Log error but don't fail the whole process
+          logger.error(
+            `Failed to send notification email for quotation ${quotationId}:`,
+            emailError instanceof Error ? emailError.message : String(emailError)
+          );
+        }
+      } else {
         logger.info(
-          `Successfully sent match notification email for quotation ${quotationId}`
-        );
-      } catch (emailError) {
-        // Log error but don't fail the whole process
-        logger.error(
-          `Failed to send notification email for quotation ${quotationId}:`,
-          emailError instanceof Error ? emailError.message : String(emailError)
+          `Email sending skipped for quotation ${quotationId} (sendEmail=false, likely proactive match)`
         );
       }
 

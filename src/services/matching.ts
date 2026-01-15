@@ -394,10 +394,16 @@ async function saveMatchesToDatabase(
     let rosarioPricePerTon: number | null = null;
     let rosarioDifference: number | null = null;
     let rosarioDifferencePercent: number | null = null;
+    let profitabilityVsReference = 0; // Calculate profitabilityVsReference dynamically
 
     if (rosarioMatch) {
       const rosarioPaymentOption = rosarioMatch.opportunity.paymentOptions[0];
       rosarioPricePerTon = Number(rosarioPaymentOption.pricePerTon || 0);
+
+      // Calculate profitabilityVsReference: match profitability - rosario profitability
+      profitabilityVsReference = match.profitability - rosarioMatch.profitability;
+
+      console.log(`[Match ${match.opportunity.id}] Calculating profitabilityVsReference: match.profitability=${match.profitability}, rosario.profitability=${rosarioMatch.profitability}, diff=${profitabilityVsReference}`);
 
       const quotationQuantity = Number(quotation.quantityTons);
       if (quotationQuantity > 0) {
@@ -458,7 +464,7 @@ async function saveMatchesToDatabase(
       commission: safeDecimal(match.commission),
       profitability: safeDecimal(match.profitability),
       transportationCost: safeDecimal(match.transportationCost),
-      profitabilityVsReference: safeDecimal(match.profitabilityVsReference),
+      profitabilityVsReference: safeDecimal(profitabilityVsReference),
       pricePerTon: safeDecimal(pricePerTon),
       transportCost: safeDecimal(match.transportationCost),
       totalAmount: safeDecimal(totalAmount),

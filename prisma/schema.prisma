@@ -14,9 +14,11 @@ model Product {
   createdAt      DateTime         @default(now()) @map("created_at")
   updatedAt      DateTime         @updatedAt
   category       String           @default("Granos")
+  cierres        cierres[]
   opportunities  Opportunity[]
   quotations     Quotation[]
   referencePrice ReferencePrice[]
+  sellers_list   sellers_list[]
 
   @@map("products")
 }
@@ -57,36 +59,36 @@ model Opportunity {
   userId                  String?
   isSpecialOffer          Boolean         @default(false) @map("is_special_offer")
   companyId               Int?            @map("company_id")
+  inviteCodes             InviteCode[]
   matches                 Match[]
   company                 Company?        @relation(fields: [companyId], references: [id])
   location                Location        @relation(fields: [locationId], references: [id])
   product                 Product         @relation(fields: [productId], references: [id])
   user                    User?           @relation(fields: [userId], references: [id])
   paymentOptions          PaymentOption[]
-  inviteCodes             InviteCode[]
 
   @@map("opportunities")
 }
 
 model Quotation {
-  id               Int      @id @default(autoincrement())
-  productId        Int      @map("product_id")
-  quantityTons     Decimal  @map("quantity_tons") @db.Decimal(10, 2)
-  status           String   @default("pending")
-  createdAt        DateTime @default(now()) @map("created_at")
-  updatedAt        DateTime @updatedAt @map("updated_at")
-  locationId       Int      @map("location_id")
-  name             String   @map("name")
-  cellphone        String   @map("cellphone")
-  email            String   @map("email")
+  id               Int       @id @default(autoincrement())
+  productId        Int       @map("product_id")
+  quantityTons     Decimal   @map("quantity_tons") @db.Decimal(10, 2)
+  status           String    @default("pending")
+  createdAt        DateTime  @default(now()) @map("created_at")
+  updatedAt        DateTime  @updatedAt @map("updated_at")
+  locationId       Int       @map("location_id")
+  name             String    @map("name")
+  cellphone        String    @map("cellphone")
+  email            String    @map("email")
   userId           String?
-  processingStatus String   @default("not_started") @map("processing_status")
-  token            String?  @unique
+  processingStatus String    @default("not_started") @map("processing_status")
+  token            String?   @unique
   tokenExpiresAt   DateTime? @map("token_expires_at")
   matches          Match[]
-  location         Location @relation(fields: [locationId], references: [id])
-  product          Product  @relation(fields: [productId], references: [id])
-  user             User?    @relation(fields: [userId], references: [id])
+  location         Location  @relation(fields: [locationId], references: [id])
+  product          Product   @relation(fields: [productId], references: [id])
+  user             User?     @relation(fields: [userId], references: [id])
 
   @@map("quotations")
 }
@@ -106,17 +108,16 @@ model Match {
   totalAmount              Decimal       @map("total_amount") @db.Decimal(15, 2)
   transportCost            Decimal       @map("transport_cost") @db.Decimal(15, 2)
   routeId                  Int?          @map("route_id")
-  // NEW: Complete data persistence for email rendering
-  exchangeRateUsed         Decimal?      @map("exchange_rate_used") @db.Decimal(10, 4)
   distanceKm               Int?          @map("distance_km")
+  exchangeRateUsed         Decimal?      @map("exchange_rate_used") @db.Decimal(10, 4)
+  isReferenceBased         Boolean       @default(false) @map("is_reference_based")
   isSpecialOffer           Boolean       @default(false) @map("is_special_offer")
-  rosarioPricePerTon       Decimal?      @map("rosario_price_per_ton") @db.Decimal(10, 2)
+  paymentTermDays          Int?          @map("payment_term_days")
+  referenceDiffDisplay     String?       @map("reference_diff_display") @db.VarChar(50)
   rosarioDifference        Decimal?      @map("rosario_difference") @db.Decimal(15, 2)
   rosarioDifferencePercent Decimal?      @map("rosario_difference_percent") @db.Decimal(5, 2)
+  rosarioPricePerTon       Decimal?      @map("rosario_price_per_ton") @db.Decimal(10, 2)
   transportRateApplied     Decimal?      @map("transport_rate_applied") @db.Decimal(10, 2)
-  paymentTermDays          Int?          @map("payment_term_days")
-  isReferenceBased         Boolean       @default(false) @map("is_reference_based")
-  referenceDiffDisplay     String?       @map("reference_diff_display") @db.VarChar(50)
   opportunity              Opportunity   @relation(fields: [opportunityId], references: [id], onDelete: Cascade)
   paymentOption            PaymentOption @relation(fields: [paymentOptionId], references: [id], onDelete: Cascade)
   quotation                Quotation     @relation(fields: [quotationId], references: [id])
@@ -126,19 +127,22 @@ model Match {
 }
 
 model Location {
-  id                Int           @id @default(autoincrement())
+  id                Int            @id @default(autoincrement())
   city              String
   state             String?
   country           String
   latitude          Float
   longitude         Float
-  createdAt         DateTime      @default(now()) @map("created_at")
-  updatedAt         DateTime      @updatedAt @map("updated_at")
-  placeId           String        @unique @map("place_id")
+  createdAt         DateTime       @default(now()) @map("created_at")
+  updatedAt         DateTime       @updatedAt @map("updated_at")
+  placeId           String         @unique @map("place_id")
+  compradores       compradores[]
   opportunities     Opportunity[]
   quotations        Quotation[]
-  destinationRoutes Route[]       @relation("destinationRoutes")
-  originRoutes      Route[]       @relation("originRoutes")
+  destinationRoutes Route[]        @relation("destinationRoutes")
+  originRoutes      Route[]        @relation("originRoutes")
+  sellers_list      sellers_list[]
+  vendedores        vendedores[]
 
   @@map("locations")
 }
@@ -257,10 +261,10 @@ model InviteCode {
   used          Boolean      @default(false)
   usedBy        String?
   expiresAt     DateTime
-  opportunityId Int?         @map("opportunity_id")
   createdAt     DateTime     @default(now()) @map("created_at")
   updatedAt     DateTime     @updatedAt @map("updated_at")
-  opportunity   Opportunity? @relation(fields: [opportunityId], references: [id], onDelete: SetNull)
+  opportunityId Int?         @map("opportunity_id")
+  opportunity   Opportunity? @relation(fields: [opportunityId], references: [id])
 
   @@map("invite_codes")
 }
@@ -303,4 +307,69 @@ model Company {
   users         User[]
 
   @@map("companies")
+}
+
+model cierres {
+  id                     Int         @id @default(autoincrement())
+  numeroContrato         String      @unique
+  fecha_negocio          DateTime
+  vendedor_id            Int
+  comprador_id           Int
+  cantidad               String
+  procedencia            String
+  destino                String
+  precio                 String
+  forma_pago             String
+  condicion_recibo       String
+  cupo                   String
+  observaciones          String?
+  created_at             DateTime    @default(now())
+  updated_at             DateTime
+  a_o                    Int         @map("año")
+  numero_secuencial      Int
+  product_id             Int
+  estado_pago            String      @default("PENDIENTE")
+  fecha_vencimiento_pago DateTime?
+  compradores            compradores @relation(fields: [comprador_id], references: [id])
+  products               Product     @relation(fields: [product_id], references: [id])
+  vendedores             vendedores  @relation(fields: [vendedor_id], references: [id])
+}
+
+model compradores {
+  id          Int       @id @default(autoincrement())
+  nombre      String
+  cuit        String
+  created_at  DateTime  @default(now())
+  updated_at  DateTime
+  location_id Int?
+  cierres     cierres[]
+  locations   Location? @relation(fields: [location_id], references: [id])
+}
+
+model sellers_list {
+  id            Int      @id @default(autoincrement())
+  name          String
+  email         String
+  cellphone     String
+  product_id    Int
+  quantity_tons Decimal  @db.Decimal(10, 2)
+  location_id   Int
+  quality       String?
+  is_active     Boolean  @default(true)
+  created_at    DateTime @default(now())
+  updated_at    DateTime
+  locations     Location @relation(fields: [location_id], references: [id])
+  products      Product  @relation(fields: [product_id], references: [id])
+}
+
+model vendedores {
+  id          Int       @id @default(autoincrement())
+  nombre      String
+  cuit        String
+  contacto    String
+  created_at  DateTime  @default(now())
+  updated_at  DateTime
+  location_id Int?
+  cierres     cierres[]
+  locations   Location? @relation(fields: [location_id], references: [id])
 }

@@ -158,9 +158,12 @@ matchQueue.process("test-job", async (job) => {
 
 // Default process handler for all other jobs (no name = default)
 matchQueue.process(async (job) => {
+  const { quotationId, sendEmail = true } = job.data; // Extract sendEmail with default true
+
   logger.info(`Starting to process job ${job.id}`, {
     jobId: job.id,
-    quotationId: job.data.quotationId,
+    quotationId,
+    sendEmail,
     timestamp: new Date().toISOString(),
   });
 
@@ -168,15 +171,17 @@ matchQueue.process(async (job) => {
     // Import dynamically to ensure proper initialization
     const { processMatches } = await import("./processors/match-processor");
 
-    logger.info(`Processing matches for quotation ${job.data.quotationId}`, {
+    logger.info(`Processing matches for quotation ${quotationId}`, {
       jobId: job.id,
+      sendEmail,
       processorLoaded: true,
     });
 
-    await processMatches(job.data.quotationId, prisma, logger);
+    await processMatches(quotationId, prisma, logger, sendEmail); // Pass sendEmail to processMatches
 
     logger.info(`Successfully completed processing for job ${job.id}`, {
-      quotationId: job.data.quotationId,
+      quotationId,
+      sendEmail,
       completed: true,
     });
 
@@ -185,7 +190,8 @@ matchQueue.process(async (job) => {
     logger.error(`Error processing job ${job.id}:`, {
       error: error instanceof Error ? error.message : "Unknown error",
       stack: error instanceof Error ? error.stack : undefined,
-      quotationId: job.data.quotationId,
+      quotationId,
+      sendEmail,
     });
     throw error;
   }
@@ -355,10 +361,11 @@ app.post("/api/process", async (req, res) => {
   }
 
   try {
-    const { quotationId } = req.body;
+    const { quotationId, sendEmail = true } = req.body; // Default true for backward compatibility
 
     logger.info("Processing authenticated request:", {
       quotationId,
+      sendEmail,
       timestamp: new Date().toISOString(),
     });
 
@@ -394,12 +401,14 @@ app.post("/api/process", async (req, res) => {
     try {
       const job = await matchQueue.add({
         quotationId,
+        sendEmail, // Pass sendEmail flag to the job
         timestamp: new Date().toISOString(),
       });
 
       logger.info(`Successfully added job to queue:`, {
         jobId: job.id,
         quotationId,
+        sendEmail,
       });
 
       // Get current queue status
