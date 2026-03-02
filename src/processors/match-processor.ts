@@ -59,26 +59,24 @@ export async function processMatches(
 
       // Only send email if sendEmail flag is true
       if (sendEmail) {
+        // Format quotation for notifications
+        const emailQuotation = {
+          id: quotation.id,
+          product: quotation.product,
+          location: {
+            ...quotation.location,
+            state: quotation.location.state || "",
+          },
+          quantityTons: Number(quotation.quantityTons),
+          name: quotation.name,
+          cellphone: quotation.cellphone,
+          email: quotation.email,
+          token: quotation.token,
+        };
+
         try {
           // Import email service with correct path
           const { sendMatchNotification } = await import("../services/email");
-
-          // Format quotation for email
-          const emailQuotation = {
-            id: quotation.id,
-            product: quotation.product,
-            location: {
-              ...quotation.location,
-              state: quotation.location.state || "",
-            },
-            quantityTons: Number(quotation.quantityTons),
-            name: quotation.name,
-            cellphone: quotation.cellphone,
-            email: quotation.email,
-            token: quotation.token, // Include token for the CTA button link
-          };
-
-          // Send notification
           await sendMatchNotification(emailQuotation, matches);
           logger.info(
             `Successfully sent match notification email for quotation ${quotationId}`
@@ -88,6 +86,19 @@ export async function processMatches(
           logger.error(
             `Failed to send notification email for quotation ${quotationId}:`,
             emailError instanceof Error ? emailError.message : String(emailError)
+          );
+        }
+
+        try {
+          const { sendQuotationNotification } = await import("../services/whatsapp");
+          await sendQuotationNotification(emailQuotation, matches);
+          logger.info(
+            `Successfully sent WhatsApp notification for quotation ${quotationId}`
+          );
+        } catch (whatsappError) {
+          logger.error(
+            `Failed to send WhatsApp notification for quotation ${quotationId}:`,
+            whatsappError instanceof Error ? whatsappError.message : String(whatsappError)
           );
         }
       } else {

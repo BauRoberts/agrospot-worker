@@ -134,7 +134,7 @@ async function calculateMatchData(
     );
     const routeResponse = await routingService.getRoute(
       quotation.location,
-      opportunity.id === -1 ? ROSARIO_LOCATION : opportunity.location
+      opportunity.id < 0 ? ROSARIO_LOCATION : opportunity.location
     );
 
     console.log("Route data:", {
@@ -584,8 +584,8 @@ export async function createMatchesForQuotation(quotationId: number) {
   // Save only real matches to database
   if (matches.length > 0) {
     try {
-      // Find Rosario match for comparison calculations
-      const rosarioMatch = matches.find((m) => m.opportunity.id === -1);
+      // Find Rosario match for comparison calculations (any negative ID is a Rosario reference)
+      const rosarioMatch = matches.find((m) => m.opportunity.id < 0);
 
       const savedMatches = await saveMatchesToDatabase(
         quotationId,
