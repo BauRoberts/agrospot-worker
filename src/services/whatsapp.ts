@@ -59,7 +59,7 @@ export async function sendQuotationNotification(
       const distance = Math.round(m.distance);
       return `${i + 1}. ${city} $${priceK}k/tn (${distance}km)`;
     })
-    .join(" • ");
+    .join("\n");
 
   // Send template to user if they have a cellphone
   if (quotation.cellphone) {
