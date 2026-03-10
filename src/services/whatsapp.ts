@@ -1,5 +1,6 @@
 // src/services/whatsapp.ts
 import { WhatsAppClient } from "@kapso/whatsapp-cloud-api";
+import { formatPhoneNumber } from "../lib/phone";
 
 const KAPSO_API_KEY = process.env.KAPSO_API_KEY;
 const KAPSO_PHONE_NUMBER_ID = process.env.KAPSO_PHONE_NUMBER_ID || "";
@@ -14,11 +15,6 @@ const client = KAPSO_API_KEY
     })
   : null;
 
-function formatPhoneNumber(phone: string): string {
-  let cleaned = phone.replace(/\D/g, "");
-  if (!cleaned.startsWith("54")) cleaned = "54" + cleaned;
-  return cleaned;
-}
 
 function getNotificationPhones(): string[] {
   return WHATSAPP_NOTIFICATION_PHONES.split(",")
@@ -59,7 +55,7 @@ export async function sendQuotationNotification(
       const distance = Math.round(m.distance);
       return `${i + 1}. ${city} $${priceK}k/tn (${distance}km)`;
     })
-    .join("\n");
+    .join(" • ");
 
   // Send template to user if they have a cellphone
   if (quotation.cellphone) {
