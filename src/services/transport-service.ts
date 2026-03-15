@@ -1,12 +1,12 @@
 //src/services/transport-service.ts
 import { prisma } from "../lib/prisma";
 
-// Discount to apply to transport rates (15%)
-const TRANSPORT_RATE_DISCOUNT = 0.15;
+// 10% discount applied to FETRA reference rates (Jan 2026)
+const TRANSPORT_RATE_DISCOUNT = 0.10;
 
 /**
  * Get transport rate per ton for a given distance
- * Applies a 15% discount to rates from the transport rates table
+ * Applies a 10% discount to FETRA reference rates (Jan 2026)
  */
 export async function getTransportRate(distanceKm: number): Promise<number> {
   try {
@@ -42,45 +42,38 @@ export async function getTransportRate(distanceKm: number): Promise<number> {
       return Number(fallbackRange.ratePerTon);
     }
 
-    // 3. If no custom ranges apply, fall back to the existing table logic
+    // 3. If no custom ranges apply, use the transport rates table
+    // Use >= distance to get the closest rate at or above the actual distance
     const transportRate = await prisma.transportRate.findFirst({
       where: {
         kilometers: {
-          lte: distance,
+          gte: distance,
         },
       },
-      orderBy: {
-        kilometers: "desc",
-      },
-    });
-
-    if (transportRate) {
-      // Apply 15% discount to the transport rate
-      const baseRate = Number(transportRate.ratePerTon);
-      const discountedRate = baseRate * (1 - TRANSPORT_RATE_DISCOUNT);
-      
-      // Round to 2 decimal places
-      return Math.round(discountedRate * 100) / 100;
-    }
-
-    // 4. Final fallback to closest rate or default value
-    const defaultRate = await prisma.transportRate.findFirst({
       orderBy: {
         kilometers: "asc",
       },
     });
 
-    if (defaultRate) {
-      // Apply 15% discount to the default rate
-      const baseRate = Number(defaultRate.ratePerTon);
-      const discountedRate = baseRate * (1 - TRANSPORT_RATE_DISCOUNT);
-      
-      // Round to 2 decimal places
-      return Math.round(discountedRate * 100) / 100;
+    if (transportRate) {
+      const baseRate = Number(transportRate.ratePerTon);
+      return Math.round(baseRate * (1 - TRANSPORT_RATE_DISCOUNT) * 100) / 100;
+    }
+
+    // 4. Distance beyond table range — use the maximum rate
+    const maxRate = await prisma.transportRate.findFirst({
+      orderBy: {
+        kilometers: "desc",
+      },
+    });
+
+    if (maxRate) {
+      const baseRate = Number(maxRate.ratePerTon);
+      return Math.round(baseRate * (1 - TRANSPORT_RATE_DISCOUNT) * 100) / 100;
     }
 
     // 5. Ultimate fallback
-    return distance * 10 * (1 - TRANSPORT_RATE_DISCOUNT); // Very basic fallback rate with discount
+    return Math.round(distance * 10 * (1 - TRANSPORT_RATE_DISCOUNT) * 100) / 100;
   } catch (error) {
     console.error("Error getting transport rate:", error);
     throw new Error(
