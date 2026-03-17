@@ -58,11 +58,10 @@ export async function sendQuotationNotification(
     const rosarioFinalPrice =
       Number(rosarioMatch.opportunity.paymentOptions[0].pricePerTon) -
       rosarioMatch.transportationCost / quantity;
-    const diffARS = matchFinalPrice - rosarioFinalPrice;
+    const diffARS = Math.abs(matchFinalPrice - rosarioFinalPrice);
     const diffPct = ((diffARS / rosarioFinalPrice) * 100).toFixed(1);
-    const sign = diffARS >= 0 ? "+" : "";
     const diffARSk = Math.round(diffARS / 1000);
-    matchText += ` - Mejor que Rosario en ${sign}$${diffARSk}k/tn (${sign}${diffPct}%)`;
+    matchText += ` - Mejor que Rosario en +$${diffARSk}k/tn (+${diffPct}%)`;
   }
 
   // For internal notification, show top 3
